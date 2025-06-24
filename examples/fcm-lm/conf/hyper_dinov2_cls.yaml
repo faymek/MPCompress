@@ -1,0 +1,16 @@
+model_type: dinov2
+task: cls
+max_v: 104.1752
+min_v: -552.451
+trun_high: 5
+trun_low: -5
+
+lambda_value_all: [0.001, 0.0017, 0.003, 0.0035, 0.01]
+epochs: 200
+learning_rate: "1e-4"
+batch_size: 128
+patch_size: "256 256"
+trun_flag: true
+quant_type: uniform
+samples: 0
+bit_depth: 1 

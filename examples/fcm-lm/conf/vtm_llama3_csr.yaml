@@ -1,0 +1,10 @@
+model_type: llama3
+task: csr
+max_v: 47.75
+min_v: -78
+trun_high: 5
+trun_low: -5
+trun_flag: true
+quant_samples: 0
+quant_type: uniform
+bit_depth: 10 

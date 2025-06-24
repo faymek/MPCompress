@@ -1,0 +1,10 @@
+model_type: dinov2
+task: cls
+max_v: 104.1752
+min_v: -552.451
+trun_high: 20
+trun_low: -20
+trun_flag: true
+quant_samples: 0
+quant_type: uniform
+bit_depth: 10 

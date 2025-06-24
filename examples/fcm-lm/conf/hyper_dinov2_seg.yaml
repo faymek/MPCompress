@@ -1,0 +1,16 @@
+model_type: dinov2
+task: seg
+max_v: 103.2168
+min_v: -530.9767
+trun_high: 5
+trun_low: -5
+
+lambda_value_all: [0.0005, 0.001, 0.003, 0.007, 0.015]
+epochs: 800
+learning_rate: "1e-4"
+batch_size: 128
+patch_size: "256 256"
+trun_flag: true
+quant_type: uniform
+samples: 0
+bit_depth: 1 
