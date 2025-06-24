@@ -1,0 +1,117 @@
+exp:
+  name: MPC12-VQGAN-from-MPC2
+  quality: "12.0"
+
+model: 
+  type: MPC12_VQGAN
+  N: 192
+  M: 120
+  D: 256
+  D_DINO: 384
+  D_VQGAN: 256
+  groups: 5
+  dynamic_size: True
+  patch_size: 16
+
+  dino_config:
+    model_size: small
+    img_size: 256
+    patch_size: 16
+    dynamic_size: True
+    n_last_blocks: 4
+
+  vqgan_config:
+    ckpt_path: /home/faymek/Models/kmeans_tune/16384_kmeans_1024_epoch/epoch1/checkpoints/last.ckpt
+    n_embed: 1024
+    embed_dim: 256
+    ddconfig:
+      double_z: false
+      z_channels: 256
+      resolution: 256
+      in_channels: 3
+      out_ch: 3
+      ch: 128
+      ch_mult: [1, 1, 2, 2, 4]
+      num_res_blocks: 2
+      attn_resolutions:
+      - 16
+      dropout: 0.0
+
+load:
+  path: /home/faymek/MPCompress/exp/MPC2/Q3.0/runner.last.pth.tar
+  strict: false
+  rename:
+    - "latent_codec.hyper.h_a.0 -> useless"
+    - "hyper.h_a. -> hyper.h_a.h_a."
+    - "hyper.h_s. -> hyper.h_s.h_s."
+  rules:
+    - "!dino.*"
+    - "!vqgan.*"
+
+tune:
+  main_optimizer:
+    - "!*.quantiles"  # 排除以.quantiles结尾的
+    - "!dino.*"  # 排除以dino.开头的
+    - "!vqgan.*"  # 排除以vqgan.开头的
+
+  aux_optimizer:
+    - "*.quantiles"
+
+misc:
+  epochs: 20
+  batch_size: 16
+  test_batch_size: 1
+  num_workers: 16
+  clip_max_norm: 1.0
+  check: false
+  visual: true
+
+main_scheduler:
+  type: torch.optim.lr_scheduler.StepLR
+  step_size: 18
+  gamma: 0.1
+
+train_dataset:
+  type: ImageFolder
+  root: /home/faymek/Datasets/IN1K
+  split: train
+
+val_dataset:
+  type: ImageFolder
+  root: /home/faymek/Datasets/IN1K
+  split: test_small
+
+train_transforms:
+  type: Compose
+  transforms:
+    - type: RandomCrop
+      size: 512
+      pad_if_needed: true
+    - type: ToTensor
+
+val_transforms:
+  type: Compose
+  transforms:
+    - type: CenterCrop
+      size: 512
+    - type: ToTensor
+
+criterion:
+  type: MPC12Loss
+  rlmbda: 12.0
+
+main_optimizer:
+  type: torch.optim.Adam
+  lr: 1e-4
+
+aux_optimizer:
+  type: torch.optim.Adam
+  lr: 1e-3
+
+engine:
+  cuda: true
+  save: true
+  seed: 42
+  deterministic: false
+  cudnn_benchmark: true
+  

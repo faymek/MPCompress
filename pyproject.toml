@@ -1,0 +1,88 @@
+[tool.black]
+line-length = 120
+
+[tool.pylint.master]
+persistent = false
+score = false
+
+[tool.pylint.messages_control]
+disable = "all"
+enable = [
+  "miscellaneous",
+  "similarities",
+]
+
+[tool.pylint.similarities]
+ignore-comments = true
+ignore-docstrings = true
+ignore-imports = true
+min-similarity-lines = 8
+
+[tool.pylint.reports]
+reports = false
+
+[tool.pylint.miscellaneous]
+notes = [
+  "FIXME",
+  "XXX",
+  "TODO",
+]
+
+[tool.poetry]
+name = "mpcompress"
+version = "0.1.0"
+description = ""
+authors = ["Faymek Feng <faymek.f@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+torch = {version = "2.4.0", source = "pytorch-cu121"}
+torchvision = {version = "0.19.0", source = "pytorch-cu121"}
+omegaconf = "^2.3.0"
+torchmetrics = "^1.7.0"
+iopath = "^0.1.10"
+fvcore = "^0.1.5.post20221221"
+xformers = "^0.0.27.post2"
+# submitit = { git = "https://github.com/facebookincubator/submitit.git" }
+compressai = "^1.2.6"
+tensorboard = "^2.19.0"
+timm = "^1.0.15"
+pytorch-lightning = "^2.5.1"
+pyiqa = "^0.1.13"
+transformers = "4.37.2"
+diffusers = "^0.33.1"
+accelerate = "^1.6.0"
+plotly = "^6.0.1"
+open-clip-torch = "^2.32.0"
+einops = "^0.8.1"
+gdown = "^5.2.0"
+huggingface-hub = "^0.31.2"
+wandb = "^0.19.11"
+torch-fidelity = "^0.3.0"
+torchinfo = "^1.8.0"
+webdataset = "^0.2.111"
+notebook = "^7.4.3"
+tqdm = "^4.67.1"
+
+
+[[tool.poetry.source]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+priority = "explicit"
+
+[[tool.poetry.source]]
+name = "xformers"
+url = "https://pypi.org/simple/"
+priority = "explicit"
+
+[[tool.poetry.source]]
+name = "nvidia"
+url = "https://pypi.nvidia.com"
+priority = "explicit"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+
