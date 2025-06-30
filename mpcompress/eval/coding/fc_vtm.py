@@ -369,7 +369,7 @@ def get_vtm_fc_config(preset_name):
     else:   
         config_str = f"trunl{cfg.trun_low}_trunh{cfg.trun_high}_{cfg.quant_type}{cfg.quant_samples}_bitdepth{cfg.bit_depth}"
 
-    cfg.vtm_path = os.path.join(os.path.dirname(__file__), "coding/vtm_baseline")
+    cfg.vtm_path = os.path.join(os.path.dirname(__file__), "vtm_baseline")
     cfg.config_str = config_str
     return cfg
 
