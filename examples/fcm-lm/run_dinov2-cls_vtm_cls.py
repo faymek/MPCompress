@@ -184,13 +184,13 @@ def cls_pipeline(
 # run below to extract original features as the dataset.
 # You can skip feature extraction if you have download the test dataset from https://drive.google.com/drive/folders/1RZFGlBd6wZr4emuGO4_YJWfKPtAwcMXQ
 if __name__ == "__main__":
-    base_path = os.path.realpath(os.path.join(os.path.dirname(__file__), "../../data"))
+    base_path = "/home/fz2001/Ant/MPCompress/data"
     backbone_checkpoint_path = f"{base_path}/models/backbone/dinov2_vitg14_pretrain.pth"
     head_checkpoint_path = f"{base_path}/models/clf_head/dinov2_vitg14_linear_head.pth"
     source_data_root = f"{base_path}/dataset/ImageNet_val_sel100"
     source_label_name = f"{base_path}/dataset/ImageNet_val_sel100/labels.txt"
     org_feature_path = f"{base_path}/test-fc/ImageNet--dinov2_cls/feat"
-    # rec_feature_path = f'{base_path}/test-fc/ImageNet--dinov2_cls/vtm_trunl-20_trunh20_uniform0_bitdepth10/postprocessed/QP42'
+    rec_feature_path = f"{base_path}/test-fc/ImageNet--dinov2_cls/vtm_trunl-20_trunh20_uniform0_bitdepth10/postprocessed/QP42"
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model = dinov2_vitg14_lc(
