@@ -275,8 +275,8 @@ if __name__ == "__main__":
     cfg = get_hyper_fc_config("dinov2_cls")    
 
     # Extract features
-    # train_dataset, train_dataloader = build_dataset(source_train_data_root, 'train', batch_size=cfg.batch_size)
-    train_dataset, train_dataloader = build_dataset(source_train_data_root, 'train', batch_size=1)
+    train_dataset, train_dataloader = build_dataset(source_train_data_root, 'train', batch_size=cfg.batch_size)
+    # train_dataset, train_dataloader = build_dataset(source_train_data_root, 'train', batch_size=1)
     print(f"\nExtracting features from {source_train_data_root} to {org_train_feature_path}")
     extract_features(model, train_dataloader, org_train_feature_path)
 
