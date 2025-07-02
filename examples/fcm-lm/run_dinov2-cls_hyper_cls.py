@@ -12,6 +12,9 @@ from pathlib import Path
 from PIL import Image
 from mpcompress.eval.coding.fc_vtm import run_vtm_compression, get_vtm_fc_config
 
+from mpcompress.eval.coding.fc_hyper import get_hyper_fc_config
+from mpcompress.eval.coding.fc_hyper import hyperprior_train_pipeline, hyperprior_evaluate_pipeline
+
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning) # Disable xFormers UserWarning
 os.environ['USE_XFORMERS'] = '0'    # Disable xFormers to obtain/extract consistent features in multiple runs
@@ -186,65 +189,6 @@ def cls_pipeline(backbone_checkpoint_path: str, head_checkpoint_path: str, data_
     print(f"Feature MSE: {feat_mse:.8f}")
 
 
-def vtm_baseline_evaluation():
-    # Set up paths
-    backbone_checkpoint_path = '/home/gaocs/models/dinov2/dinov2_vitg14_pretrain.pth'
-    head_checkpoint_path = '/home/gaocs/models/dinov2/dinov2_vitg14_cls_linear_head.pth'
-    source_img_path = '/home/gaocs/projects/FCM-LM/Data/dinov2/cls/source/ImageNet_Selected100'
-    source_label_name = '/home/gaocs/projects/FCM-LM/Data/dinov2/cls/source/imagenet_selected_label100.txt'
-    org_feature_path = '/home/gaocs/projects/FCM-LM/Data/dinov2/cls/feature_test'
-    vtm_root_path = f'/home/gaocs/projects/FCM-LM/Data/dinov2/cls/vtm_baseline'; print('vtm_root_path: ', vtm_root_path)
-
-    # Initialize the model
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    model = dinov2_vitg14_lc(layers=1, pretrained=True, weights=[backbone_checkpoint_path, head_checkpoint_path])
-    model.to(device)
-
-    # Evaluate and print results
-    max_v = 104.1752; min_v = -552.451; trun_high = 20; trun_low = -20
-
-    trun_flag = True; samples = 0; bit_depth = 10; quant_type = 'uniform'
-    if trun_flag == False: trun_high = max_v; trun_low = min_v
-
-    QPs = [22]
-    for QP in QPs:
-        print(trun_low, trun_high, samples, bit_depth, quant_type, QP)
-        rec_feature_path = f"{vtm_root_path}/postprocessed/trunl{trun_low}_trunh{trun_high}_{quant_type}{samples}_bitdepth{bit_depth}/QP{QP}"
-        acc, feat_mse = evaluate_cls(model, org_feature_path, rec_feature_path, source_label_name)
-        print(f"Classification Accuracy: {acc:.4f}")
-        # print(f"Feature MSE: {feat_mse:.8f}")
-
-def hyperprior_baseline_evaluation():
-    # Set up paths
-    backbone_checkpoint_path = '/home/gaocs/models/dinov2/dinov2_vitg14_pretrain.pth'
-    head_checkpoint_path = '/home/gaocs/models/dinov2/dinov2_vitg14_cls_linear_head.pth'
-    source_img_path = '/home/gaocs/projects/FCM-LM/Data/dinov2/cls/source/ImageNet_Selected100'
-    source_label_name = '/home/gaocs/projects/FCM-LM/Data/dinov2/cls/source/imagenet_selected_label100.txt'
-    org_feature_path = '/home/gaocs/projects/FCM-LM/Data/dinov2/cls/feature_test'
-    root_path = f'/home/gaocs/projects/FCM-LM/Data/dinov2/cls/hyperprior'; print('root_path: ', root_path)
-
-    # Initialize the model
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    model = dinov2_vitg14_lc(layers=1, pretrained=True, weights=[backbone_checkpoint_path, head_checkpoint_path])
-    model.to(device)
-
-    # Evaluate and print results
-    max_v = 104.1752; min_v = -552.451; trun_high = 5; trun_low = -5
-    epochs = 800; learning_rate="1e-4"; batch_size = 128; patch_size = "256 256"
-    lambda_value_all = [0.001, 0.0017, 0.003, 0.0035, 0.01]
-
-    trun_flag = True
-    samples = 0; bit_depth = 1; quant_type = 'uniform'
-
-    if trun_flag == False: trun_high = max_v; trun_low = min_v
-
-    for lambda_value in lambda_value_all:
-        print(trun_low, trun_high, samples, bit_depth, quant_type, lambda_value)
-        rec_feature_path = f"{root_path}/decoded/trunl{trun_low}_trunh{trun_high}_{quant_type}{samples}_bitdepth{bit_depth}/lambda{lambda_value}_epoch{epochs}_lr{learning_rate}_bs{batch_size}_patch{patch_size.replace(' ', '-')}"
-        acc, feat_mse = evaluate_cls(model, org_feature_path, rec_feature_path, source_label_name)
-        print(f"Classification Accuracy: {acc:.4f}")
-        # print(f"Feature MSE: {feat_mse:.8f}")
-
 # # run below to evaluate the reconstructed features
 # if __name__ == "__main__":
 #     # vtm_baseline_evaluation()
@@ -253,36 +197,56 @@ def hyperprior_baseline_evaluation():
 # run below to extract original features as the dataset. 
 # You can skip feature extraction if you have download the test dataset from https://drive.google.com/drive/folders/1RZFGlBd6wZr4emuGO4_YJWfKPtAwcMXQ
 if __name__ == "__main__":
-    base_path = '/home/fz2001/Ant/MPCompress/data'
+    base_path = '/home/faymek/MPCompress/data'
     backbone_checkpoint_path = f'{base_path}/models/backbone/dinov2_vitg14_pretrain.pth'
     head_checkpoint_path = f'{base_path}/models/clf_head/dinov2_vitg14_linear_head.pth'
-    source_data_root = f'{base_path}/dataset/ImageNet_val_sel100'
-    source_label_name = f'{base_path}/dataset/ImageNet_val_sel100/labels.txt'
-    org_feature_path = f'{base_path}/test-fc/ImageNet--dinov2_cls/feat'
-    rec_feature_path = f'{base_path}/test-fc/ImageNet--dinov2_cls/vtm_trunl-20_trunh20_uniform0_bitdepth10/postprocessed/QP42'
+    
+    source_train_data_root = f'{base_path}/dataset/ImageNet_train_sel100'
+    source_train_label_name = f'{base_path}/dataset/ImageNet_train_sel100/labels.txt'
+    source_test_data_root = f'{base_path}/dataset/ImageNet_val_sel100'
+    source_test_label_name = f'{base_path}/dataset/ImageNet_val_sel100/labels.txt'
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    org_train_feature_path = f'{base_path}/train-fc/ImageNet--dinov2_cls/feat'
+    org_test_feature_path = f'{base_path}/test-fc/ImageNet--dinov2_cls/feat'
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = dinov2_vitg14_lc(layers=1, pretrained=True, weights=[backbone_checkpoint_path, head_checkpoint_path])
     model.to(device)
-    test_dataset, test_dataloader = build_dataset(source_data_root, 'val', batch_size=1)
+
+    cfg = get_hyper_fc_config("dinov2_cls")    
 
     # Extract features
-    print(f"\nExtracting features from {source_data_root} to {org_feature_path}")
-    extract_features(model, test_dataloader, org_feature_path)
+    train_dataset, train_dataloader = build_dataset(source_train_data_root, 'train', batch_size=cfg.batch_size)
+    # train_dataset, train_dataloader = build_dataset(source_train_data_root, 'train', batch_size=1)
+    print(f"\nExtracting features from {source_train_data_root} to {org_train_feature_path}")
+    # extract_features(model, train_dataloader, org_train_feature_path)
 
-    QPs = [42]
-    for QP in QPs:
-        cfg = get_vtm_fc_config("dinov2_cls")
-        test_root = f'{base_path}/test-fc/ImageNet--dinov2_cls/vtm_{cfg.config_str}'
-        print(f"\nRunning VTM compression for QP{QP} from {org_feature_path} to {test_root}")
-        run_vtm_compression(org_feature_path, test_root, cfg, QP)
+    test_dataset, test_dataloader = build_dataset(source_test_data_root, 'val', batch_size=1)
+    print(f"\nExtracting features from {source_test_data_root} to {org_test_feature_path}")
+    # extract_features(model, test_dataloader, org_test_feature_path)
+    
+    prefix = 'ImageNet--dinov2_cls'
+    lambda_value_all = cfg.lambda_value_all
+
+    # Train and print results
+    for lambda_value in lambda_value_all:  
+        train_root = f'{base_path}/train-fc/ImageNet--dinov2_cls'
+        print(f"\nTraining hyperprior compression for lambda{lambda_value} from {org_train_feature_path} to {train_root}")
+        hyperprior_train_pipeline(base_path, prefix, cfg, lambda_value)
+        print(f"\nTraining hyperprior compression for lambda{lambda_value} Finished!")
 
     # Evaluate and print results
-    for QP in QPs:
-        rec_feature_path = f'{base_path}/test-fc/ImageNet--dinov2_cls/vtm_trunl-20_trunh20_uniform0_bitdepth10/postprocessed/QP{QP}'
-        # rec_feature_path = f'{base_path}/test-fc/ImageNet--dinov2_cls/feat'
-        print(f"\nEvaluating VTM compression for QP{QP} from {rec_feature_path}")
-        acc, feat_mse = evaluate_cls(model, org_feature_path, rec_feature_path, source_label_name)
-        print(f"QP{QP} Classification Accuracy: {acc:.4f}")
+    for lambda_value in lambda_value_all:
+        test_root = f'{base_path}/test-fc/ImageNet--dinov2_cls/'
+        print(f"\nRunning hyperprior compression for lambda{lambda_value} from {org_test_feature_path} to {test_root}")
+        hyperprior_evaluate_pipeline(base_path, prefix, cfg, lambda_value)
+
+    for lambda_value in lambda_value_all:
+        patch_size_str = cfg.patch_size.replace(' ', '-')
+        rec_test_feature_path = f'{base_path}/test-fc/{prefix}/hyperprior/decoded/trunl{cfg.trun_low}_trunh{cfg.trun_high}_{cfg.quant_type}{cfg.samples}_bitdepth{cfg.bit_depth}/lambda{lambda_value}_epoch{cfg.epochs}_lr{cfg.learning_rate}_bs{cfg.batch_size}_patch{patch_size_str}'
+        print(f"\nEvaluating VTM compression for lambda{lambda_value} from {rec_test_feature_path}")
+        acc, feat_mse = evaluate_cls(model, org_test_feature_path, rec_test_feature_path, source_test_label_name)
+        print(f"lambda{lambda_value} Classification Accuracy: {acc:.4f}")
         print(f"Feature MSE: {feat_mse:.8f}")
+    
 

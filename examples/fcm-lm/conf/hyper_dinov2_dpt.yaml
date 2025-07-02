@@ -1,0 +1,16 @@
+model_type: dinov2
+task: dpt
+max_v: [3.2777, 5.0291, 25.0456, 102.0307]
+min_v: [-2.4246, -26.8908, -323.2952, -504.4310]
+trun_high: [1, 2, 10, 10]
+trun_low: [-1, -2, -10, -10]
+
+lambda_value_all: [0.001, 0.005, 0.02, 0.05, 0.12]
+epochs: 200
+learning_rate: "1e-4"
+batch_size: 128
+patch_size: "256 256"
+trun_flag: true
+quant_type: uniform
+samples: 0
+bit_depth: 1 

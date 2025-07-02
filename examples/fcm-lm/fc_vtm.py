@@ -307,70 +307,24 @@ def vtm_decode_only(org_feat_path, test_path, cfg, QP):
 
 
 def get_vtm_fc_config(preset_name):
-    # 预设配置
-    presets = {
-        'llama3_csr': {
-            'model_type': 'llama3',
-            'task': 'csr', 
-            'max_v': 47.75,
-            'min_v': -78,
-            'trun_high': 5,
-            'trun_low': -5
-        },
-        'dinov2_cls': {
-            'model_type': 'dinov2',
-            'task': 'cls',
-            'max_v': 104.1752,
-            'min_v': -552.451,
-            'trun_high': 20,
-            'trun_low': -20
-        },
-        'dinov2_seg': {
-            'model_type': 'dinov2',
-            'task': 'seg',
-            'max_v': 103.2168,
-            'min_v': -530.9767,
-            'trun_high': 20,
-            'trun_low': -20
-        },
-        'dinov2_dpt': {
-            'model_type': 'dinov2',
-            'task': 'dpt',
-            'max_v': [3.2777, 5.0291, 25.0456, 102.0307],
-            'min_v': [-2.4246, -26.8908, -323.2952, -504.4310],
-            'trun_high': [1,2,10,20],
-            'trun_low': [-1,-2,-10,-20]
-        },
-        'sd3_tti': {
-            'model_type': 'sd3',
-            'task': 'tti',
-            'max_v': 4.668,
-            'min_v': -6.176,
-            'trun_high': 4.668,
-            'trun_low': -6.176
-        }
-    }
+    """
+    从 conf 目录下加载对应的 YAML 配置文件。
+    """
+    conf_dir = os.path.join(os.path.dirname(__file__), 'conf')
+    conf_path = os.path.join(conf_dir, f'vtm_{preset_name}.yaml')
+    if not os.path.exists(conf_path):
+        raise FileNotFoundError(f"配置文件不存在: {conf_path}")
+    cfg = OmegaConf.load(conf_path)
 
-    compression_config = {
-        "trun_flag": True,
-        "quant_samples": 0,
-        "quant_type": 'uniform',
-        "bit_depth": 10,
-    }
-
-    preset = presets[preset_name]
-    cfg = OmegaConf.create(preset)
-    cfg.update(compression_config)
 
     if cfg.trun_flag is False:
-        cfg.trun_high = cfg.max_v
-        cfg.trun_low = cfg.min_v
         config_str = f"trun0_{cfg.quant_type}{cfg.quant_samples}_bitdepth{cfg.bit_depth}"
     else:   
         config_str = f"trunl{cfg.trun_low}_trunh{cfg.trun_high}_{cfg.quant_type}{cfg.quant_samples}_bitdepth{cfg.bit_depth}"
 
-    cfg.vtm_path = os.path.join(os.path.dirname(__file__), "vtm_baseline")
     cfg.config_str = config_str
+    cfg.vtm_path = os.path.join(os.path.dirname(__file__), "vtm_compiled")
+
     return cfg
 
 

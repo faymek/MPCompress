@@ -1,0 +1,10 @@
+model_type: dinov2
+task: dpt
+max_v: [3.2777, 5.0291, 25.0456, 102.0307]
+min_v: [-2.4246, -26.8908, -323.2952, -504.4310]
+trun_high: [1, 2, 10, 20]
+trun_low: [-1, -2, -10, -20]
+trun_flag: true
+quant_samples: 0
+quant_type: uniform
+bit_depth: 10 
