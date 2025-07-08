@@ -1,23 +1,17 @@
 import os
-import json
-
-# import random
-import numpy as np
-from tqdm import tqdm
-import torch
-import torch.nn as nn
-from torch.utils.data import Dataset
-from torchvision import transforms, datasets
-from mpcompress.backbone.dinov2.hub.classifiers import dinov2_vitg14_lc
-from pathlib import Path
-from PIL import Image
 import sys
+import warnings
+
+import numpy as np
+import torch
+from torchvision import transforms
+from tqdm import tqdm
+
+from mpcompress.backbone.dinov2.hub.classifiers import dinov2_vitg14_lc
+from mpcompress.datasets import SmallImageNetDataset
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from fc_vtm import run_vtm_compression, get_vtm_fc_config
-from mpcompress.datasets import SmallImageNetDataset
-import warnings
-from omegaconf import OmegaConf
+from fc_vtm import get_vtm_fc_config, run_vtm_compression
 
 warnings.filterwarnings("ignore", category=UserWarning)  # Disable xFormers UserWarning
 os.environ["USE_XFORMERS"] = (
@@ -184,13 +178,13 @@ def cls_pipeline(
 # run below to extract original features as the dataset.
 # You can skip feature extraction if you have download the test dataset from https://drive.google.com/drive/folders/1RZFGlBd6wZr4emuGO4_YJWfKPtAwcMXQ
 if __name__ == "__main__":
-    base_path = "/home/fz2001/Ant/MPCompress/data"
+    base_path = os.path.realpath(os.path.join(os.path.dirname(__file__), "../../data"))
     backbone_checkpoint_path = f"{base_path}/models/backbone/dinov2_vitg14_pretrain.pth"
     head_checkpoint_path = f"{base_path}/models/clf_head/dinov2_vitg14_linear_head.pth"
     source_data_root = f"{base_path}/dataset/ImageNet_val_sel100"
     source_label_name = f"{base_path}/dataset/ImageNet_val_sel100/labels.txt"
     org_feature_path = f"{base_path}/test-fc/ImageNet--dinov2_cls/feat"
-    rec_feature_path = f"{base_path}/test-fc/ImageNet--dinov2_cls/vtm_trunl-20_trunh20_uniform0_bitdepth10/postprocessed/QP42"
+    # rec_feature_path = f'{base_path}/test-fc/ImageNet--dinov2_cls/vtm_trunl-20_trunh20_uniform0_bitdepth10/postprocessed/QP42'
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model = dinov2_vitg14_lc(
@@ -209,7 +203,9 @@ if __name__ == "__main__":
     for QP in QPs:
         # 读取YAML配置
         cfg = get_vtm_fc_config("dinov2_cls")
-        test_root = f"{base_path}/test-fc/ImageNet--dinov2_cls/vtm_{cfg.config_str}"
+        test_root = (
+            f"{base_path}/test-fc/ImageNet_val_sel100--dinov2_cls/vtm_{cfg.config_str}"
+        )
         print(
             f"\nRunning VTM compression for QP{QP} from {org_feature_path} to {test_root}"
         )

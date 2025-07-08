@@ -250,7 +250,7 @@ def vtm_pipeline(org_feat_path, test_root, cfg, QP):
 
     feat_names = os.listdir(org_feat_path)
     # feat_names = feat_names[:1]
-    for feat_name in tqdm(feat_names, total=len(feat_names), desc="Coding features"):
+    for feat_name in tqdm(feat_names, total=len(feat_names), desc="Compress features"):
         # Set related names
         stem = feat_name[:-4]
         org_feat_name = os.path.join(
@@ -311,7 +311,9 @@ def vtm_pipeline(org_feat_path, test_root, cfg, QP):
         encoding_time = time.time() - start
 
         # VTM decoding
+        start = time.time()
         vtm_decoding(cfg.vtm_path, bitstream_name, decoded_yuv_name, decoding_log_name)
+        decoding_time = time.time() - start
 
         # Load decoded YUV
         decoded_yuv = np.zeros_like(pack_feat)

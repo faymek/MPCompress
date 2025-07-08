@@ -1,9 +1,8 @@
 import os
+import sys
 import math
 import types
 import itertools
-import logging
-from functools import partial
 from PIL import Image
 
 import numpy as np
@@ -11,15 +10,10 @@ from tqdm import tqdm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision.transforms as transforms
 
 # mmcv/mmengine相关
-from mmcv.image import imread
-from mmcv.transforms import Compose
 from mmseg.models.utils import resize
-from mmengine.runner import load_checkpoint
 from mmengine.logging import MMLogger
-from mmengine.dataset import default_collate
 from mmengine.config import Config
 from mmengine.runner import Runner
 
@@ -30,15 +24,15 @@ from mpcompress.backbone.dinov2.hub.backbones import dinov2_vitg14
 from mmengine.model import BaseModule
 from mmseg.registry import MODELS
 from mmseg.models.builder import HEADS
-from mmseg.apis import init_model
 from mmseg.models.decode_heads.decode_head import BaseDecodeHead
 from einops import rearrange
 from typing import Tuple, List
 from torch import Tensor
 from mmseg.utils import ConfigType
 from omegaconf import OmegaConf
-from mmcv.transforms import ToTensor
-from mmseg.datasets import PascalVOCDataset
+
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from fc_vtm import get_vtm_fc_config, run_vtm_compression
 
 
 def extract_shapes(nested_structure):
@@ -51,20 +45,17 @@ def extract_shapes(nested_structure):
     else:
         return nested_structure  # 其他类型直接返回
 
+
 # 日志与警告设置
 logger = MMLogger.get_instance("mmcv")
-logger.setLevel("WARNING")    # Disable mmcv info print
+logger.setLevel("WARNING")  # Disable mmcv info print
 
 import warnings
-warnings.filterwarnings("ignore", category=UserWarning) # Disable xFormers UserWarning
-os.environ['USE_XFORMERS'] = '0'    # Disable xFormers to obtain/extract consistent features in multiple runs
 
-try:
-    from mmseg.apis import init_segmentor
-    MODELS = None
-except ImportError:
-    from mmseg.registry import MODELS
-    init_segmentor = None
+warnings.filterwarnings("ignore", category=UserWarning)  # Disable xFormers UserWarning
+os.environ["USE_XFORMERS"] = (
+    "0"  # Disable xFormers to obtain/extract consistent features in multiple runs
+)
 
 
 class CenterPadding(torch.nn.Module):
@@ -81,14 +72,25 @@ class CenterPadding(torch.nn.Module):
 
     @torch.inference_mode()
     def forward(self, x):
-        pads = list(itertools.chain.from_iterable(self._get_pad(m) for m in x.shape[:1:-1]))
+        pads = list(
+            itertools.chain.from_iterable(self._get_pad(m) for m in x.shape[:1:-1])
+        )
         output = F.pad(x, pads)
         return output
 
 
 @MODELS.register_module()
 class DinoVisionBackbone(BaseModule):
-    def __init__(self, model_size="large", img_size=512, patch_size=14, out_indices=[39], final_norm=False, checkpoint=None, **kwargs):
+    def __init__(
+        self,
+        model_size="large",
+        img_size=512,
+        patch_size=14,
+        out_indices=[39],
+        final_norm=False,
+        checkpoint=None,
+        **kwargs,
+    ):
         super().__init__()
         assert model_size in ["small", "base", "large", "giant"]
         if model_size == "large":
@@ -107,10 +109,9 @@ class DinoVisionBackbone(BaseModule):
         # x: [1, 3, 518, 518] -> [1, 1370, 1536]
         outputs = self.feature_start_part(x)
         # some compression here
-        token_res = (x.shape[2]//self.patch_size, x.shape[3]//self.patch_size)
+        token_res = (x.shape[2] // self.patch_size, x.shape[3] // self.patch_size)
         outputs = self.feature_end_part(outputs, token_res=token_res)
         return outputs
-    
 
     def feature_start_part(
         self,
@@ -118,7 +119,7 @@ class DinoVisionBackbone(BaseModule):
         n=1,  # Layers or n last layers to take
         reshape=False,
         return_class_token=False,
-        norm=False, # do not perform norm in backbone, moved it to head
+        norm=False,  # do not perform norm in backbone, moved it to head
     ):
         if self.model.chunked_blocks:
             outputs = self.model._get_intermediate_layers_chunked(x, n)
@@ -126,7 +127,7 @@ class DinoVisionBackbone(BaseModule):
             outputs = self.model._get_intermediate_layers_not_chunked(x, n)
 
         return outputs
-    
+
     def feature_end_part(
         self,
         outputs,
@@ -134,24 +135,20 @@ class DinoVisionBackbone(BaseModule):
         token_res=None,
         reshape=False,
         return_class_token=False,
-        norm=False, # do not perform norm in backbone, moved it to head
+        norm=False,  # do not perform norm in backbone, moved it to head
     ):
         outputs = [self.model.norm(out) for out in outputs]
 
         # Remove class tokens and retain patch tokens
         # outputs: [1, 1370, 1536] -> [1, 1369, 1536]
-        outputs = [out[:, 1 + self.model.num_register_tokens:] for out in outputs]
+        outputs = [out[:, 1 + self.model.num_register_tokens :] for out in outputs]
 
         # Reshape and reorder dimensions for compatibility, moved it from backbone to head
         # outputs: [1, 1369, 1536] -> [1, 1536, 37, 37]
         w, h = token_res
-        outputs = [
-            rearrange(out, 'b (h w) c -> b c h w', h=h, w=w)
-            for out in outputs
-        ]
+        outputs = [rearrange(out, "b (h w) c -> b c h w", h=h, w=w) for out in outputs]
 
         return outputs
-    
 
 
 @HEADS.register_module()
@@ -169,10 +166,7 @@ class PretrainedBNHead(BaseDecodeHead):
             state_dict = {
                 k.replace("decode_head.", ""): v for k, v in state_dict.items()
             }
-            self.load_state_dict(
-                state_dict,
-                strict=True
-            )
+            self.load_state_dict(state_dict, strict=True)
 
     def _forward_feature(self, inputs):
         """Forward function for feature maps before classifying each pixel with
@@ -250,9 +244,10 @@ class PretrainedBNHead(BaseDecodeHead):
         output = self._forward_feature(inputs)
         output = self.cls_seg(output)
         return output
-    
-    def predict(self, inputs: Tuple[Tensor], batch_img_metas: List[dict],
-                test_cfg: ConfigType) -> Tensor:
+
+    def predict(
+        self, inputs: Tuple[Tensor], batch_img_metas: List[dict], test_cfg: ConfigType
+    ) -> Tensor:
         """Forward function for prediction.
 
         Args:
@@ -276,8 +271,9 @@ class PretrainedBNHead(BaseDecodeHead):
         seg_logits = resize(
             input=seg_logits,
             size=(tok_h * self.patch_size, tok_w * self.patch_size),
-            mode='bilinear',
-            align_corners=self.align_corners)
+            mode="bilinear",
+            align_corners=self.align_corners,
+        )
         # border crop
         # seg_logits = seg_logits[:, :, :img_h, :img_w]
 
@@ -286,11 +282,11 @@ class PretrainedBNHead(BaseDecodeHead):
         # crop_w = seg_logits.shape[3] - img_w
         # crop_left = crop_w // 2
         # crop_right = crop_w - crop_left
-        # crop_top = crop_h // 2  
+        # crop_top = crop_h // 2
         # crop_bottom = crop_h - crop_top
         # # print("tail crop:    ", crop_left, crop_right, crop_top, crop_bottom)
         # seg_logits = seg_logits[:, :, crop_top:crop_top+img_h, crop_left:crop_left+img_w]
-        
+
         # seg_logits = resize(
         #     input=seg_logits,
         #     size=batch_img_metas[0]['img_shape'],
@@ -298,9 +294,12 @@ class PretrainedBNHead(BaseDecodeHead):
         #     align_corners=self.align_corners)
         return seg_logits
 
+
 def fast_hist(label, prediction, n):
     k = (label >= 0) & (label < n)
-    return np.bincount(n * label[k].astype(int) + prediction[k].astype(int), minlength=n * n).reshape(n, n)
+    return np.bincount(
+        n * label[k].astype(int) + prediction[k].astype(int), minlength=n * n
+    ).reshape(n, n)
 
 
 def per_class_miou(hist):
@@ -322,7 +321,6 @@ def head_decode(self, outputs, img_metas, shape):
     """
     # Normalize feature maps using the backbone model's normalization, moved it from backbone to head
 
-
     # Process through neck if applicable
     x = tuple(outputs)
     if self.with_neck:
@@ -336,7 +334,6 @@ def head_decode(self, outputs, img_metas, shape):
 
 
 def slide_inference_encode(self, img, img_meta, rescale=True):
-
     """Extract features using sliding-window inference.
 
     Args:
@@ -404,10 +401,19 @@ def slide_inference_decode(self, feature_list, img_meta, rescale=True):
             x1 = max(x2 - w_crop, 0)
 
             # Decode crop and update predictions
-            token_res = (h_crop//self.backbone.patch_size, w_crop//self.backbone.patch_size)
-            crop_feature_list = self.backbone.feature_end_part(feature_list[i], token_res=token_res)
-            crop_seg_logit = self.head_decode(crop_feature_list, img_meta, (h_crop, w_crop))
-            preds += F.pad(crop_seg_logit, (x1, preds.shape[3] - x2, y1, preds.shape[2] - y2))
+            token_res = (
+                h_crop // self.backbone.patch_size,
+                w_crop // self.backbone.patch_size,
+            )
+            crop_feature_list = self.backbone.feature_end_part(
+                feature_list[i], token_res=token_res
+            )
+            crop_seg_logit = self.head_decode(
+                crop_feature_list, img_meta, (h_crop, w_crop)
+            )
+            preds += F.pad(
+                crop_seg_logit, (x1, preds.shape[3] - x2, y1, preds.shape[2] - y2)
+            )
             count_mat[:, :, y1:y2, x1:x2] += 1
             i += 1
 
@@ -418,13 +424,15 @@ def slide_inference_decode(self, feature_list, img_meta, rescale=True):
     if rescale:
         # Resize predictions to original image size
         resize_shape = img_meta[0].img_shape[:2]
-        preds = preds[:, :, :resize_shape[0], :resize_shape[1]]
+        preds = preds[:, :, : resize_shape[0], : resize_shape[1]]
         preds = resize(
             preds,
-            size=img_meta[0].ori_shape[:2],  # ori_shape is the original shape of the image 
-            mode='bilinear',
+            size=img_meta[0].ori_shape[
+                :2
+            ],  # ori_shape is the original shape of the image
+            mode="bilinear",
             align_corners=self.align_corners,
-            warning=False
+            warning=False,
         )
 
     return preds
@@ -442,14 +450,14 @@ def simple_test_encode(self, img, img_meta, rescale=True):
         List[torch.Tensor]: Extracted features from the input image.
     """
     # Ensure the test mode is valid
-    assert self.test_cfg.mode in ['slide', 'whole'], "Invalid test mode"
+    assert self.test_cfg.mode in ["slide", "whole"], "Invalid test mode"
 
     # Check that all images have the same original shape
     # ori_shape = img_meta['ori_shape']
     # assert all(meta['ori_shape'] == ori_shape for meta in img_meta), "Mismatch in original shapes across metadata"
 
     # Extract features based on the test mode
-    if self.test_cfg.mode == 'slide':
+    if self.test_cfg.mode == "slide":
         feature_list = self.slide_inference_encode(img, img_meta, rescale)
     else:
         raise ValueError("Only 'slide' mode is currently supported")
@@ -502,7 +510,6 @@ def simple_test_decode(self, feature_list, img_meta, rescale=True):
     return seg_pred
 
 
-
 def extract_features(runner: Runner, org_feature_path: str):
     """Extract and save features for given images.
 
@@ -512,8 +519,8 @@ def extract_features(runner: Runner, org_feature_path: str):
         org_feature_path (str): Path to save extracted features.
         image_list (List[str]): List of image names to process.0
     """
+    os.makedirs(org_feature_path, exist_ok=True)
     device = next(runner.model.parameters()).device
-
 
     for data in runner.test_dataloader:
         # img = data["inputs"]
@@ -523,15 +530,24 @@ def extract_features(runner: Runner, org_feature_path: str):
         img_meta = data["data_samples"]
 
         with torch.no_grad():
-            org_feature_list = runner.model.simple_test_encode(img, img_meta, rescale=True)
-            org_feature_list = [torch.cat(feature_list) for feature_list in org_feature_list]
+            org_feature_list = runner.model.simple_test_encode(
+                img, img_meta, rescale=True
+            )
+            org_feature_list = [
+                torch.cat(feature_list) for feature_list in org_feature_list
+            ]
             org_feature_list = torch.stack(org_feature_list)
             # Save features
-            image_name = img_meta[0].img_path.split('/')[-1].split('.')[0]
-            np.save(f'{org_feature_path}/{image_name}.npy', org_feature_list.cpu().detach().numpy())
+            image_name = img_meta[0].img_path.split("/")[-1].split(".")[0]
+            np.save(
+                f"{org_feature_path}/{image_name}.npy",
+                org_feature_list.cpu().detach().numpy(),
+            )
 
 
-def seg_evaluate(runner: Runner, source_img_path: str, org_feature_path: str, rec_feature_path: str):
+def seg_evaluate(
+    runner: Runner, source_img_path: str, org_feature_path: str, rec_feature_path: str
+):
     """Evaluate segmentation performance.
 
     Args:
@@ -547,7 +563,9 @@ def seg_evaluate(runner: Runner, source_img_path: str, org_feature_path: str, re
     """
     device = next(runner.model.parameters()).device
 
-    hist = np.zeros((runner.model.decode_head.num_classes, runner.model.decode_head.num_classes))   # 20 classes + 1 background
+    hist = np.zeros(
+        (runner.model.decode_head.num_classes, runner.model.decode_head.num_classes)
+    )  # 20 classes + 1 background
     mse_list = []
 
     for data in runner.test_dataloader:
@@ -557,32 +575,33 @@ def seg_evaluate(runner: Runner, source_img_path: str, org_feature_path: str, re
         img_meta = data["data_samples"]
 
         with torch.no_grad():
-            image_name = img_meta[0].img_path.split('/')[-1].split('.')[0]
+            image_name = img_meta[0].img_path.split("/")[-1].split(".")[0]
             # img = Image.open(f'{source_img_path}/JPEGImages/{image_name}.jpg')
-            label = Image.open(f'{source_img_path}/SegmentationClass/{image_name}.png')
+            label = Image.open(f"{source_img_path}/SegmentationClass/{image_name}.png")
 
             # Load features and move to the specified device
-            rec_feature_numpy = np.load(f'{rec_feature_path}/{image_name}.npy')
+            rec_feature_numpy = np.load(f"{rec_feature_path}/{image_name}.npy")
             rec_features_tensor = torch.from_numpy(rec_feature_numpy).to(device)
-            
+
             # Convert features to the required format for the model
             rec_feature_list = [
-                [rec_features_tensor[i, j].unsqueeze(0) for j in range(rec_features_tensor.shape[1])]
+                [
+                    rec_features_tensor[i, j].unsqueeze(0)
+                    for j in range(rec_features_tensor.shape[1])
+                ]
                 for i in range(rec_features_tensor.shape[0])
             ]
-            
+
             # Perform segmentation prediction
             pred = runner.model.simple_test_decode(
-                rec_feature_list, 
-                img_meta, 
-                rescale=True
+                rec_feature_list, img_meta, rescale=True
             )
 
         array_label = np.array(label)
         hist += fast_hist(array_label, pred[0], runner.model.decode_head.num_classes)
 
         # Calculate MSE
-        org_feature = np.load(f'{org_feature_path}/{image_name}.npy')
+        org_feature = np.load(f"{org_feature_path}/{image_name}.npy")
         mse = (np.square(org_feature - rec_feature_numpy)).mean()
         mse_list.append(mse)
 
@@ -593,68 +612,89 @@ def seg_evaluate(runner: Runner, source_img_path: str, org_feature_path: str, re
     return all_iou, all_miou, mse_list
 
 
-def seg_pipeline(config_path: str, backbone_checkpoint_path: str, head_checkpoint_path: str, source_img_path: str, source_split_name: str, org_feature_path: str, rec_feature_path: str):
-    """Main function to run the depth estimation pipeline."""
-    # Load configuration
+def config_runner(config_path: str, backbone_checkpoint_path: str, head_checkpoint_path: str):
     cfg = Config.fromfile(config_path)
-    
-    # Setup source image list
-    with open(source_split_name) as f:
-        image_list = f.readlines()
-        image_list = ''.join(image_list).strip('\n').splitlines()
-
-    # Setup models
-    # backbone_model = setup_backbone(backbone_checkpoint_path)
-    # model = build_segmentation_model(cfg, backbone_checkpoint_path, head_checkpoint_path)
+    cfg.model.backbone.checkpoint = backbone_checkpoint_path
+    cfg.model.decode_head.checkpoint = head_checkpoint_path
     runner = Runner.from_cfg(cfg)
-    # runner.test()
+    # runner.test()  # execute this to evaluate the model without compression
+    runner.model.eval()
+
     runner.model.simple_test_encode = types.MethodType(simple_test_encode, runner.model)
     runner.model.simple_test_decode = types.MethodType(simple_test_decode, runner.model)
-    runner.model.slide_inference_encode = types.MethodType(slide_inference_encode, runner.model)
-    runner.model.slide_inference_decode = types.MethodType(slide_inference_decode, runner.model)
+    runner.model.slide_inference_encode = types.MethodType(
+        slide_inference_encode, runner.model
+    )
+    runner.model.slide_inference_decode = types.MethodType(
+        slide_inference_decode, runner.model
+    )
     runner.model.head_decode = types.MethodType(head_decode, runner.model)
-    # print(runner)
-    
-    # Extract features
-    os.makedirs(org_feature_path, exist_ok=True)
+
+    return runner
+
+def seg_pipeline(
+    config_path: str,
+    backbone_checkpoint_path: str,
+    head_checkpoint_path: str,
+    source_img_path: str,
+    source_split_name: str,
+    org_feature_path: str,
+    rec_feature_path: str,
+):
+    """Main function to run the depth estimation pipeline."""
+    # Load configuration
+    runner = config_runner(config_path, backbone_checkpoint_path, head_checkpoint_path)
+
     extract_features(runner, org_feature_path)
-    
-    # Evaluate and print results
-    all_iou, all_miou, mse_list = seg_evaluate(runner, source_img_path, org_feature_path, rec_feature_path)
-    
-    print(f"IoU: ", end=" ")
-    for iou in all_iou: print(f"{iou*100:.4f}", end=" ") 
-    print(f"\nmIoU: {all_miou*100:.4f}")
+
+    all_iou, all_miou, mse_list = seg_evaluate(
+        runner, source_img_path, org_feature_path, rec_feature_path
+    )
+
+    print("IoU (each class): ", " ".join([f"{iou * 100:.4f}" for iou in all_iou]))
+    print(f"mIoU: {all_miou * 100:.4f}")
     print(f"Feature MSE: {np.mean(mse_list):.8f}")
+
 
 def vtm_baseline_evaluation():
     # Set up paths
-    config_path = 'cfg/dinov2_vitg14_voc2012_linear_config.py'
-    backbone_checkpoint_path = '/home/gaocs/models/dinov2/dinov2_vitg14_pretrain.pth'
-    head_checkpoint_path = '/home/gaocs/models/dinov2/dinov2_vitg14_voc2012_linear_head.pth'
-    
-    source_img_path = '/home/gaocs/projects/FCM-LM/Data/dinov2/seg/source/VOC2012'
-    source_split_name = '/home/gaocs/projects/FCM-LM/Data/dinov2/seg/source/val_20.txt'
-    org_feature_path = '/home/gaocs/projects/FCM-LM/Data/dinov2/seg/feature_test'
-    vtm_root_path = f'/home/gaocs/projects/FCM-LM/Data/dinov2/seg/vtm_baseline'; print('vtm_root_path: ', vtm_root_path)
-    
+    config_path = "cfg/dinov2_vitg14_voc2012_linear_config.py"
+    backbone_checkpoint_path = "/home/gaocs/models/dinov2/dinov2_vitg14_pretrain.pth"
+    head_checkpoint_path = (
+        "/home/gaocs/models/dinov2/dinov2_vitg14_voc2012_linear_head.pth"
+    )
+
+    source_img_path = "/home/gaocs/projects/FCM-LM/Data/dinov2/seg/source/VOC2012"
+    source_split_name = "/home/gaocs/projects/FCM-LM/Data/dinov2/seg/source/val_20.txt"
+    org_feature_path = "/home/gaocs/projects/FCM-LM/Data/dinov2/seg/feature_test"
+    vtm_root_path = f"/home/gaocs/projects/FCM-LM/Data/dinov2/seg/vtm_baseline"
+    print("vtm_root_path: ", vtm_root_path)
+
     # Load configuration
     cfg = Config.fromfile(config_path)
-    
+
     # Setup source image list
     with open(source_split_name) as f:
         image_list = f.readlines()
-        image_list = ''.join(image_list).strip('\n').splitlines()
+        image_list = "".join(image_list).strip("\n").splitlines()
 
     # Setup models
     backbone_model = setup_backbone(backbone_checkpoint_path)
     model = build_segmentation_model(cfg, backbone_model, head_checkpoint_path)
-    
-    # Evaluate and print results
-    max_v = 103.2168; min_v = -530.9767; trun_high = 20; trun_low = -20
 
-    trun_flag = True; samples = 0; bit_depth = 10; quant_type = 'uniform'
-    if trun_flag == False: trun_high = max_v; trun_low = min_v
+    # Evaluate and print results
+    max_v = 103.2168
+    min_v = -530.9767
+    trun_high = 20
+    trun_low = -20
+
+    trun_flag = True
+    samples = 0
+    bit_depth = 10
+    quant_type = "uniform"
+    if trun_flag == False:
+        trun_high = max_v
+        trun_low = min_v
 
     QPs = [22]
     for QP in QPs:
@@ -662,74 +702,128 @@ def vtm_baseline_evaluation():
         rec_feature_path = f"{vtm_root_path}/postprocessed/trunl{trun_low}_trunh{trun_high}_{quant_type}{samples}_bitdepth{bit_depth}/QP{QP}"
         # rec_feature_path = '/home/gaocs/projects/FCM-LM/Data/dinov2/seg/feature_test'
 
-        all_iou, all_miou, mse_list = seg_evaluate(model, source_img_path, org_feature_path, rec_feature_path, image_list, backbone_model)
+        all_iou, all_miou, mse_list = seg_evaluate(
+            model,
+            source_img_path,
+            org_feature_path,
+            rec_feature_path,
+            image_list,
+            backbone_model,
+        )
         # print(f"IoU: ", end=" ")
-        # for iou in all_iou: print(f"{iou*100:.4f}", end=" ") 
-        print(f"\nmIoU: {all_miou*100:.4f}")
+        # for iou in all_iou: print(f"{iou*100:.4f}", end=" ")
+        print(f"\nmIoU: {all_miou * 100:.4f}")
         print(f"Feature MSE: {np.mean(mse_list):.8f}")
+
 
 def hyperprior_baseline_evaluation():
     # Set up paths
-    config_path = 'cfg/dinov2_vitg14_voc2012_linear_config.py'
-    backbone_checkpoint_path = '/home/gaocs/models/dinov2/dinov2_vitg14_pretrain.pth'
-    head_checkpoint_path = '/home/gaocs/models/dinov2/dinov2_vitg14_voc2012_linear_head.pth'
-    
-    source_img_path = '/home/gaocs/projects/FCM-LM/Data/dinov2/seg/source/VOC2012'
-    source_split_name = '/home/gaocs/projects/FCM-LM/Data/dinov2/seg/source/val_20.txt'
-    org_feature_path = '/home/gaocs/projects/FCM-LM/Data/dinov2/seg/feature_test'
-    root_path = f'/home/gaocs/projects/FCM-LM/Data/dinov2/seg/hyperprior'; print('root_path: ', root_path)
-    
+    config_path = "cfg/dinov2_vitg14_voc2012_linear_config.py"
+    backbone_checkpoint_path = "/home/gaocs/models/dinov2/dinov2_vitg14_pretrain.pth"
+    head_checkpoint_path = (
+        "/home/gaocs/models/dinov2/dinov2_vitg14_voc2012_linear_head.pth"
+    )
+
+    source_img_path = "/home/gaocs/projects/FCM-LM/Data/dinov2/seg/source/VOC2012"
+    source_split_name = "/home/gaocs/projects/FCM-LM/Data/dinov2/seg/source/val_20.txt"
+    org_feature_path = "/home/gaocs/projects/FCM-LM/Data/dinov2/seg/feature_test"
+    root_path = f"/home/gaocs/projects/FCM-LM/Data/dinov2/seg/hyperprior"
+    print("root_path: ", root_path)
+
     # Load configuration
     cfg = Config.fromfile(config_path)
-    
+
     # Setup source image list
     with open(source_split_name) as f:
         image_list = f.readlines()
-        image_list = ''.join(image_list).strip('\n').splitlines()
+        image_list = "".join(image_list).strip("\n").splitlines()
 
     # Setup models
     backbone_model = setup_backbone(backbone_checkpoint_path)
     model = build_segmentation_model(cfg, backbone_model, head_checkpoint_path)
-    
+
     # Evaluate and print results
-    max_v = 103.2168; min_v = -530.9767; trun_high = 5; trun_low = -5
+    max_v = 103.2168
+    min_v = -530.9767
+    trun_high = 5
+    trun_low = -5
     lambda_value_all = [0.0005, 0.001, 0.003, 0.007, 0.015]
-    epochs = 800; learning_rate = "1e-4"; batch_size = 128; patch_size = "256 256"   # height first, width later
+    epochs = 800
+    learning_rate = "1e-4"
+    batch_size = 128
+    patch_size = "256 256"  # height first, width later
 
     trun_flag = True
-    samples = 0; bit_depth = 1; quant_type = 'uniform'
+    samples = 0
+    bit_depth = 1
+    quant_type = "uniform"
 
-    if trun_flag == False: trun_high = max_v; trun_low = min_v
+    if trun_flag == False:
+        trun_high = max_v
+        trun_low = min_v
 
     for lambda_value in lambda_value_all:
         print(trun_low, trun_high, samples, bit_depth, quant_type, lambda_value)
         rec_feature_path = f"{root_path}/decoded/trunl{trun_low}_trunh{trun_high}_{quant_type}{samples}_bitdepth{bit_depth}/lambda{lambda_value}_epoch{epochs}_lr{learning_rate}_bs{batch_size}_patch{patch_size.replace(' ', '-')}"
 
-        all_iou, all_miou, mse_list = seg_evaluate(model, source_img_path, org_feature_path, rec_feature_path, image_list, backbone_model)
+        all_iou, all_miou, mse_list = seg_evaluate(
+            model,
+            source_img_path,
+            org_feature_path,
+            rec_feature_path,
+            image_list,
+            backbone_model,
+        )
         # print(f"IoU: ", end=" ")
-        # for iou in all_iou: print(f"{iou*100:.4f}", end=" ") 
-        print(f"\nmIoU: {all_miou*100:.4f}")
+        # for iou in all_iou: print(f"{iou*100:.4f}", end=" ")
+        print(f"\nmIoU: {all_miou * 100:.4f}")
         print(f"Feature MSE: {np.mean(mse_list):.8f}")
+
 
 # # run below to evaluate the reconstructed features
 # if __name__ == "__main__":
 #     # vtm_baseline_evaluation()
 #     hyperprior_baseline_evaluation()
 
-# run below to extract original features as the dataset. 
+# run below to extract original features as the dataset.
 # You can skip feature extraction if you have download the test dataset from https://drive.google.com/drive/folders/1RZFGlBd6wZr4emuGO4_YJWfKPtAwcMXQ
 if __name__ == "__main__":
-    base_path = os.path.realpath(os.path.join(os.path.dirname(__file__), '../../data'))
-    config_path = os.path.join(os.path.dirname(__file__), 'conf-mmcv/dinov2_vitg14_voc2012_linear_config.py')
+    base_path = os.path.realpath(os.path.join(os.path.dirname(__file__), "../../data"))
+    config_path = os.path.join(
+        os.path.dirname(__file__), "conf-mmcv/dinov2_vitg14_voc2012_linear_config.py"
+    )
     backbone_checkpoint_path = f"{base_path}/models/backbone/dinov2_vitg14_pretrain.pth"
-    head_checkpoint_path = f"{base_path}/models/clf_head/dinov2_vitg14_linear_head.pth"
-    
+    head_checkpoint_path = f"{base_path}/models/seg_head/dinov2_vitg14_voc2012_linear_head.pth"
+
     source_img_path = f"{base_path}/dataset/VOC2012"
     source_split_name = f"{base_path}/dataset/VOC2012/VOC2012_sel20.txt"
     org_feature_path = f"{base_path}/test-fc/VOC2012_sel20--dinov2_seg/feat"
-    rec_feature_path = f"{base_path}/test-fc/VOC2012_sel20--dinov2_seg/feat"
+    # rec_feature_path = f"{base_path}/test-fc/VOC2012_sel20--dinov2_seg/feat"
 
-    # rec_feature_path = f"/home/faymek/MPCompress/data/dataset/VOC2012_sel20/feat_provide"
-    # rec_feature_path = f"{base_path}/test-fc/VOC2012_sel20--dinov2_seg/vtm_trunl-20_trunh20_uniform0_bitdepth10/postprocessed/QP42"
+    print(backbone_checkpoint_path)
+    print(head_checkpoint_path)
 
-    seg_pipeline(config_path, backbone_checkpoint_path, head_checkpoint_path, source_img_path, source_split_name, org_feature_path, rec_feature_path)
+    runner = config_runner(config_path, backbone_checkpoint_path, head_checkpoint_path)
+    extract_features(runner, org_feature_path)
+
+    QPs = [42]
+    for QP in QPs:
+        # 读取YAML配置
+        cfg = get_vtm_fc_config("dinov2_seg")
+        test_root = f"{base_path}/test-fc/VOC2012_val_sel20--dinov2_seg/vtm_{cfg.config_str}"
+        print(
+            f"\nRunning VTM compression for QP{QP} from {org_feature_path} to {test_root}"
+        )
+        run_vtm_compression(org_feature_path, test_root, cfg, QP)
+
+    for QP in QPs:
+        rec_feature_path = f"{test_root}/postprocessed/QP{QP}"
+        print(f"\nEvaluating VTM compression for QP{QP} from {rec_feature_path}")
+
+        all_iou, all_miou, mse_list = seg_evaluate(
+            runner, source_img_path, org_feature_path, rec_feature_path
+        )
+
+        print("IoU (per class):", " ".join([f"{iou * 100:.4f}" for iou in all_iou]))
+        print(f"mIoU: {all_miou * 100:.4f}")
+        print(f"Feature MSE: {np.mean(mse_list):.8f}")
