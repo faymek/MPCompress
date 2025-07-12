@@ -1,4 +1,4 @@
-from .google import FeatureScaleHyperprior
+from .hyperprior import FeatureScaleHyperprior
 
 __all__ = [
     "FeatureScaleHyperprior",
