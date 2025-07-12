@@ -27,14 +27,17 @@ from compressai.registry import MODELS
 import pyiqa
 import importlib
 from omegaconf import OmegaConf
-from mpc.models import *
-from dinov2.eval.call_linear import run_linear_s_4, run_linear_s_1
-import dinov2.distributed as distributed
+from mpcompress.models.mpc import *
+from mpcompress.heads import Dinov2ClassifierHead
+# from dinov2.eval.call_linear import run_linear_s_4, run_linear_s_1
+# import dinov2.distributed as distributed
 import clip
+import numpy as np
+from mpcompress.utils.utils import extract_shapes
 
 
 # torch.backends.cudnn.benchmark = True
-distributed.enable(overwrite=True)
+# distributed.enable(overwrite=True)
 
 for alias, cls in list(MODELS.items()):
     MODELS[cls.__name__] = cls
@@ -193,7 +196,7 @@ def unpad_centering(x, padding):
 
 
 @torch.no_grad()
-def inference_real(model, x, fout=""):
+def inference_real(model, x, fout="", lnclf_head=None):
     x = x.unsqueeze(0)
     x_padded, padding = pad_centering(x, 128)
 
@@ -202,22 +205,30 @@ def inference_real(model, x, fout=""):
     enc_time = time.time() - start
 
     start = time.time()
-    out_dec = model.decompress(out_enc["strings"], out_enc["shape"])
+    out_dec = model.decompress(out_enc, return_rec1=True, return_lnclf=True)
     dec_time = time.time() - start
 
-    out_dec["x_hat"].clamp_(0, 1)
-    out_dec["x_hat"] = unpad_centering(out_dec["x_hat"], padding)
-
+    out_dec["rec1"].clamp_(0, 1)
+    out_dec["rec1"] = unpad_centering(out_dec["rec1"], padding)
+    
     if fout:
-        img = torch2img(out_dec["x_hat"])
+        img = torch2img(out_dec["rec1"])
         img.save(fout)
 
+    if lnclf_head:
+        predict_lables = lnclf_head.predict(out_dec["lnclf"], topk=5)
+        # convert to list and save to txt
+        predict_lables = predict_lables.tolist()
+        with open(fout + ".lnclf.txt", "w") as f:
+            for label in predict_lables:
+                f.write(f"{label}\n")
+
     num_pixels = x.size(0) * x.size(2) * x.size(3)
-    bpp_items = [len(s[0]) * 8.0 / num_pixels for s in out_enc["strings"]]
-    bpp = sum(bpp_items)
+    byte_len_items = [len(out_enc["vqgan"]["strings"][0])] + [len(s[0]) for s in out_enc["dino"]["strings"]]
+    bpp = sum(byte_len_items) * 8.0 / num_pixels
 
     iqa_result = {
-        key: func(out_dec["x_hat"], x).item() for key, func in img_metrics.items()
+        key: func(out_dec["rec1"], x).item() for key, func in img_metrics.items()
     }
     org_result = {
         "enc_time": enc_time,
@@ -287,7 +298,7 @@ def inference_esti_only_bpp(model, x, fout=""):
     return org_result
 
 
-def eval_model(model, quality, args):
+def eval_model(model, quality, args, lnclf_head=None):
     device = next(model.parameters()).device
     avg_metrics = defaultdict(float)
     records = []
@@ -311,7 +322,7 @@ def eval_model(model, quality, args):
             x = x.half()
         if args.real:
             model.update()
-            rv = inference_real(model, x, fout)
+            rv = inference_real(model, x, fout, lnclf_head)
         else:
             if args.only_bpp:
                 rv = inference_esti_only_bpp(model, x, fout)
@@ -326,6 +337,7 @@ def eval_model(model, quality, args):
             print(file, _rv)
         rv = {key: round(value, 8) for key, value in rv.items()}
         record.update(rv)
+        print(record)
         records.append(record)
     for k, v in avg_metrics.items():
         avg_metrics[k] = v / len(filepaths)
@@ -445,16 +457,24 @@ def main(argv):
             model = model.to("cuda")
         model.eval()
 
-        # avg_metrics, records = eval_model(model, quality, args)
+        if args.lnclf:
+            base_path = os.path.realpath(os.path.join(os.path.dirname(__file__), "../../data"))
+            head_checkpoint_path = f"{base_path}/models/clf_head/dinov2_vits14_linear4_head.pth"
+            lnclf_head = Dinov2ClassifierHead(384, 4, head_checkpoint_path)
+            lnclf_head.eval()
+            if args.cuda and torch.cuda.is_available():
+                lnclf_head = lnclf_head.to("cuda")
+
+        avg_metrics, records = eval_model(model, quality, args, lnclf_head)
         mem = torch.cuda.max_memory_allocated(device=None)  # bytes
         print(f"After eval_model, GPU mem: \t{mem / (2**30)}GB")
-        avg_metrics = {}
+        # avg_metrics = {}
     
-        if args.lnclf:
-            lnclf_result = run_linear_s_4(model.dino_eval_linear, valdir="val-256-768")
-            avg_metrics.update(lnclf_result)
-            mem = torch.cuda.max_memory_allocated(device=None)  # bytes
-            print(f"After eval_lnclf, GPU mem: \t{mem / (2**30)}GB")
+        # if args.lnclf:
+        #     lnclf_result = run_linear_s_4(model.dino_eval_linear, valdir="val-256-768")
+        #     avg_metrics.update(lnclf_result)
+        #     mem = torch.cuda.max_memory_allocated(device=None)  # bytes
+        #     print(f"After eval_lnclf, GPU mem: \t{mem / (2**30)}GB")
         
         del model
         if torch.cuda.is_available():
@@ -469,7 +489,7 @@ def main(argv):
             mem = torch.cuda.max_memory_allocated(device=None)  # bytes
             print(f"After eval_mmseg, GPU mem: \t{mem / (2**30)}GB")
 
-        # all_records.extend(records)
+        all_records.extend(records)
         for k, v in avg_metrics.items():
             all_avg_metrics[k].append(v)
 

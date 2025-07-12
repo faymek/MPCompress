@@ -64,8 +64,8 @@ webdataset = "^0.2.111"
 notebook = "^7.4.3"
 tqdm = "^4.67.1"
 pybind11 = "^2.13.6"
-compressai = { path = "mpcompress/eval/coding/CompressAI/", develop = true }
-
+compressai = "^1.2.8"
+torchac = "^0.9.3"
 
 [[tool.poetry.source]]
 name = "pytorch-cu121"
