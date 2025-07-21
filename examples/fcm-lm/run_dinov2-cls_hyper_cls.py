@@ -330,7 +330,7 @@ def hyperprior_baseline_evaluation():
 # run below to extract original features as the dataset.
 # You can skip feature extraction if you have download the test dataset from https://drive.google.com/drive/folders/1RZFGlBd6wZr4emuGO4_YJWfKPtAwcMXQ
 if __name__ == "__main__":
-    base_path = "/home/fz2001/Ant/MPCompress/data"
+    base_path = "/home/liuzk/projects/MPCompress/data"
     backbone_checkpoint_path = f"{base_path}/models/backbone/dinov2_vitg14_pretrain.pth"
     head_checkpoint_path = f"{base_path}/models/clf_head/dinov2_vitg14_linear_head.pth"
 
@@ -352,35 +352,30 @@ if __name__ == "__main__":
 
     cfg = get_hyper_fc_config("dinov2_cls")
 
+    prefix = "ImageNet--dinov2_cls"
+    lambda_value_all = cfg.lambda_value_all
+
+    """
     # Extract features
     train_dataset, train_dataloader = build_dataset(
         source_train_data_root, "train", batch_size=cfg.batch_size
     )
     # train_dataset, train_dataloader = build_dataset(source_train_data_root, 'train', batch_size=1)
-    print(
-        f"\nExtracting features from {source_train_data_root} to {org_train_feature_path}"
-    )
-    extract_features(model, train_dataloader, org_train_feature_path)
+    print(f"\nExtracting features from {source_train_data_root} to {org_train_feature_path}")
+    # extract_features(model, train_dataloader, org_train_feature_path)
 
-    test_dataset, test_dataloader = build_dataset(
-        source_test_data_root, "val", batch_size=1
-    )
-    print(
-        f"\nExtracting features from {source_test_data_root} to {org_test_feature_path}"
-    )
-    extract_features(model, test_dataloader, org_test_feature_path)
-
-    prefix = "ImageNet--dinov2_cls"
-    lambda_value_all = cfg.lambda_value_all
-
+    test_dataset, test_dataloader = build_dataset(source_test_data_root, 'val', batch_size=1)
+    print(f"\nExtracting features from {source_test_data_root} to {org_test_feature_path}")
+    # extract_features(model, test_dataloader, org_test_feature_path)
+    """
+    """
     # Train and print results
-    for lambda_value in lambda_value_all:
-        train_root = f"{base_path}/train-fc/ImageNet--dinov2_cls"
-        print(
-            f"\nTraining hyperprior compression for lambda{lambda_value} from {org_train_feature_path} to {train_root}"
-        )
+    for lambda_value in lambda_value_all:  
+        train_root = f'{base_path}/test-fc/ImageNet--dinov2_cls'
+        print(f"\nTraining hyperprior compression for lambda{lambda_value} from {org_train_feature_path} to {train_root}")
         hyperprior_train_pipeline(base_path, prefix, cfg, lambda_value)
         print(f"\nTraining hyperprior compression for lambda{lambda_value} Finished!")
+    """
 
     # Evaluate and print results
     for lambda_value in lambda_value_all:
@@ -391,9 +386,10 @@ if __name__ == "__main__":
         hyperprior_evaluate_pipeline(base_path, prefix, cfg, lambda_value)
 
     for lambda_value in lambda_value_all:
-        rec_test_feature_path = f"{base_path}/test-fc/{prefix}/hyperprior/decoded/trunl{cfg.trun_low}_trunh{cfg.trun_high}_{cfg.quant_type}{cfg.samples}_bitdepth{cfg.bit_depth}/lambda{lambda_value}_epoch{cfg.epochs}_lr{cfg.learning_rate}_bs{cfg.batch_size}_patch{cfg.patch_size.replace(' ', '-')}"
+        patch_size_str = cfg.patch_size.replace(" ", "-")
+        rec_test_feature_path = f"{base_path}/test-fc/{prefix}/hyperprior/decoded/trunl{cfg.trun_low}_trunh{cfg.trun_high}_{cfg.quant_type}{cfg.samples}_bitdepth{cfg.bit_depth}/lambda{lambda_value}_epoch{cfg.epochs}_lr{cfg.learning_rate}_bs{cfg.batch_size}_patch{patch_size_str}"
         print(
-            f"\nEvaluating VTM compression for lambda{lambda_value} from {rec_test_feature_path}"
+            f"\nEvaluating hyper compression for lambda{lambda_value} from {rec_test_feature_path}"
         )
         acc, feat_mse = evaluate_cls(
             model, org_test_feature_path, rec_test_feature_path, source_test_label_name

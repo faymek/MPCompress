@@ -12,5 +12,5 @@ batch_size: 128
 patch_size: "256 256"
 trun_flag: true
 quant_type: uniform
-samples: 0
+quant_samples: 0
 bit_depth: 1 

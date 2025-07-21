@@ -11,7 +11,7 @@ from mpcompress.backbone.dinov2.hub.classifiers import dinov2_vitg14_lc
 from mpcompress.datasets import SmallImageNetDataset
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from fc_vtm import get_vtm_fc_config, run_vtm_compression
+from mpcompress.eval.coding.fc_vtm import get_vtm_fc_config, run_vtm_compression
 
 warnings.filterwarnings("ignore", category=UserWarning)  # Disable xFormers UserWarning
 os.environ["USE_XFORMERS"] = (

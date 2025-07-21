@@ -5,8 +5,25 @@ import time
 
 from omegaconf import OmegaConf
 
+import torch
+
 os.environ['MKL_THREADING_LAYER'] = 'GNU'
 
+def remap_entropy_bottleneck_keys(state_dict):
+    """将旧 CompressAI checkpoint 的 key 重命名为新版本格式"""
+    new_state_dict = {}
+    for k, v in state_dict.items():
+        if "entropy_bottleneck.matrices." in k:
+            idx = k.split(".")[-1]
+            k = k.replace(f"matrices.{idx}", f"_matrix{idx}")
+        if "entropy_bottleneck.biases." in k:
+            idx = k.split(".")[-1]
+            k = k.replace(f"biases.{idx}", f"_bias{idx}")
+        if "entropy_bottleneck.factors." in k:
+            idx = k.split(".")[-1]
+            k = k.replace(f"factors.{idx}", f"_factor{idx}")
+        new_state_dict[k] = v
+    return new_state_dict
 
 def generate_commands(data_root, prefix, model_name, cfg, trun_high, trun_low, quant_type, samples, bit_depth, arch, lambda_value,):
     
@@ -26,12 +43,28 @@ def generate_commands(data_root, prefix, model_name, cfg, trun_high, trun_low, q
         trun_high = '[' + ','.join(map(str, trun_high)) + ']'    
     
 
+<<<<<<< HEAD
     train_log_path = f"{data_root}/train-fc/{prefix}/{model_name}/training_log/trunl{trun_low}_trunh{trun_high}_{quant_type}{samples}_bitdepth{bit_depth}/"
     test_log_path = f"{data_root}/test-fc/{prefix}/{model_name}/encoding_log/trunl{trun_low}_trunh{trun_high}_{quant_type}{samples}_bitdepth{bit_depth}/"
     ckpt_path = f'{data_root}/train-fc/{prefix}/{model_name}/training_models/trunl{trun_low}_trunh{trun_high}_{quant_type}{samples}_bitdepth{bit_depth}/'
     os.makedirs(os.path.dirname(train_log_path), exist_ok=True)
     os.makedirs(os.path.dirname(test_log_path), exist_ok=True)
     os.makedirs(os.path.dirname(ckpt_path), exist_ok=True)
+=======
+    train_log_dir = f"{data_root}/train-fc/{prefix}/{model_name}/training_log/{cfg.config_str}/"
+    test_log_dir = f"{data_root}/test-fc/{prefix}/{model_name}/encoding_log/{cfg.config_str}/"
+    # ckpt_dir = f'{data_root}/train-fc/{prefix}/{model_name}/training_models/{cfg.config_str}/'
+    ckpt_dir = f'{data_root}/train-fc/{prefix}/{model_name}/pretrained_models/{cfg.config_str}/'
+    os.makedirs(os.path.dirname(train_log_dir), exist_ok=True)
+    os.makedirs(os.path.dirname(test_log_dir), exist_ok=True)
+    os.makedirs(os.path.dirname(ckpt_dir), exist_ok=True)
+
+    model_config_str = f"lambda{lambda_value}_epoch{epochs}_lr{learning_rate}_bs{batch_size}_patch{patch_size.replace(' ', '-')}"
+    ckpt_path = f"{ckpt_dir}/{model_config_str}_checkpoint.pth.tar"
+    train_log_path = f"{train_log_dir}/train_{model_name}_{model_config_str}.txt"
+    test_log_path = f"{test_log_dir}/compress_{model_name}_{model_config_str}.txt"
+
+>>>>>>> 8acc88b... use feat extracted from dinov2 training hyper
 
 
     # generate train command
@@ -157,6 +190,30 @@ def hyperprior_evaluate_pipeline(data_root, prefix, cfg, lambda_value):
     quant_type = 'uniform'; samples = 0; bit_depth = 1
 
     train_cmd, eval_cmd = generate_commands(data_root, prefix, model_name, cfg, trun_high, trun_low, quant_type, samples, bit_depth, arch, lambda_value,)
+
+    # 检查并修正pretrained_models目录下的checkpoint key
+    model_config_str = f"lambda{lambda_value}_epoch{cfg.epochs}_lr{cfg.learning_rate}_bs{cfg.batch_size}_patch{cfg.patch_size.replace(' ', '-')}"
+    ckpt_dir = f"{data_root}/train-fc/{prefix}/{model_name}/pretrained_models/{cfg.config_str}/"
+    ckpt_path = f"{ckpt_dir}/{model_config_str}_checkpoint.pth.tar"
+    new_ckpt_path = ckpt_path.replace("_checkpoint.pth.tar", "_checkpoint_v2.pth.tar")
+
+    if os.path.exists(ckpt_path):
+        checkpoint = torch.load(ckpt_path, map_location="cpu")
+        state_dict = checkpoint.get("state_dict", checkpoint)
+
+        if any("entropy_bottleneck.matrices." in k for k in state_dict):
+            print("CompressAI checkpoint detected,remaping key...")
+            state_dict = remap_entropy_bottleneck_keys(state_dict)
+            checkpoint["state_dict"] = state_dict
+            torch.save(checkpoint, new_ckpt_path)
+            print(f"new checkpoint generated: {new_ckpt_path}")
+        else:
+            print("checkpoint already new form")
+    else:
+        print(f"checkpoint unfounded: {ckpt_path}")
+
+    # 修改eval_command，使用新ckpt_path
+    eval_cmd = eval_cmd.replace(ckpt_path, new_ckpt_path)
 
     time_start = time.time()
     print("\nEval Command:")
