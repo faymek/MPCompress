@@ -29,6 +29,7 @@ import importlib
 from omegaconf import OmegaConf
 from mpcompress.models.mpc import *
 from mpcompress.heads import Dinov2ClassifierHead
+
 # from dinov2.eval.call_linear import run_linear_s_4, run_linear_s_1
 # import dinov2.distributed as distributed
 import clip
@@ -56,13 +57,16 @@ def ms_ssim_db(x, y):
 def torch2img(x: torch.Tensor) -> Image.Image:
     return ToPILImage()(x.clamp_(0, 1).squeeze())
 
+
 def read_image(filepath: str) -> torch.Tensor:
     assert os.path.isfile(filepath)
     img = Image.open(filepath).convert("RGB")
-    return ToTensor()(img).unsqueeze(0).to(DEVICE)
+    return ToTensor()(img).to(DEVICE)
+
 
 def create_clip_sim_metric(name="ViT-B/32", device="cuda"):
     model, preprocess = clip.load(name, device=device)
+
     def clip_sim(img1_obj, img2_obj):
         if isinstance(img1_obj, str):
             img1 = preprocess(Image.open(img1_obj)).unsqueeze(0).to(device)
@@ -75,10 +79,13 @@ def create_clip_sim_metric(name="ViT-B/32", device="cuda"):
             f2 = model.encode_image(img2)
             cos_sim = torch.nn.functional.cosine_similarity(f1, f2, dim=-1)
         return cos_sim
+
     return clip_sim
 
 
 ms_ssim_metric = pyiqa.create_metric("ms_ssim", device=DEVICE)
+
+
 def calc_ms_ssim(img1_obj, img2_obj):
     if isinstance(img1_obj, str):
         img1 = read_image(img1_obj)
@@ -88,7 +95,9 @@ def calc_ms_ssim(img1_obj, img2_obj):
         img2 = img2_obj
     # 如果图像尺寸小于160,填充到161
     # 确保两张图片尺寸相同
-    assert img1.shape == img2.shape, f"图片尺寸不匹配: img1 {img1.shape} vs img2 {img2.shape}"
+    assert img1.shape == img2.shape, (
+        f"图片尺寸不匹配: img1 {img1.shape} vs img2 {img2.shape}"
+    )
     if img1.shape[-1] < 161 or img1.shape[-2] < 161:
         # ms ssim 最小输入 161*161
         pad_h = max(0, 161 - img1.shape[-2])
@@ -96,9 +105,11 @@ def calc_ms_ssim(img1_obj, img2_obj):
         img1 = F.pad(img1, (0, pad_w, 0, pad_h))
         img2 = F.pad(img2, (0, pad_w, 0, pad_h))
     return ms_ssim_metric(img1, img2)
-        
+
+
 def calc_ms_ssim_db(img1_obj, img2_obj):
     return -10 * torch.log10(1 - calc_ms_ssim(img1_obj, img2_obj))
+
 
 # https://github.com/chaofengc/IQA-PyTorch/blob/main/docs/ModelCard.md
 img_metrics = {
@@ -145,10 +156,6 @@ def instantiate_class(config, **kwargs):
         )
 
 
-def torch2img(x: torch.Tensor) -> Image.Image:
-    return ToPILImage()(x.clamp_(0, 1).squeeze())
-
-
 def reglob_collect_images(rootpath):
     file_list = glob.glob(os.path.join(rootpath, "**/*.*"), recursive=True)
     formats = "jpg|jpeg|png|ppm|bmp|pgm|tif|tiff|webp"
@@ -163,12 +170,6 @@ def calc_psnr(a, b):
     if mse < 1e-10:
         return 100.0
     return -10 * math.log10(mse)
-
-
-def read_image(filepath: str) -> torch.Tensor:
-    assert os.path.isfile(filepath)
-    img = Image.open(filepath).convert("RGB")
-    return ToTensor()(img)
 
 
 def pad_centering(x, p):
@@ -196,7 +197,7 @@ def unpad_centering(x, padding):
 
 
 @torch.no_grad()
-def inference_real(model, x, fout="", lnclf_head=None):
+def inference_real(model, x, fout="", recon=2, lnclf_head=None):
     x = x.unsqueeze(0)
     x_padded, padding = pad_centering(x, 128)
 
@@ -205,15 +206,22 @@ def inference_real(model, x, fout="", lnclf_head=None):
     enc_time = time.time() - start
 
     start = time.time()
-    out_dec = model.decompress(out_enc, return_rec1=True, return_lnclf=True)
+    out_dec = model.decompress(
+        out_enc, return_rec1=(recon == 1), return_rec2=(recon == 2), return_lnclf=True
+    )
     dec_time = time.time() - start
 
-    out_dec["rec1"].clamp_(0, 1)
-    out_dec["rec1"] = unpad_centering(out_dec["rec1"], padding)
-    
-    if fout:
-        img = torch2img(out_dec["rec1"])
-        img.save(fout)
+    iqa_result = {}
+    if recon != 0:
+        x_hat = out_dec["rec2" if recon == 2 else "rec1"]
+        x_hat.clamp_(0, 1)
+        x_hat = unpad_centering(x_hat, padding)
+
+        if fout:
+            img = torch2img(x_hat)
+            img.save(fout)
+
+        iqa_result = {key: func(x_hat, x).item() for key, func in img_metrics.items()}
 
     if lnclf_head:
         predict_lables = lnclf_head.predict(out_dec["lnclf"], topk=5)
@@ -224,77 +232,75 @@ def inference_real(model, x, fout="", lnclf_head=None):
                 f.write(f"{label}\n")
 
     num_pixels = x.size(0) * x.size(2) * x.size(3)
-    byte_len_items = [len(out_enc["vqgan"]["strings"][0])] + [len(s[0]) for s in out_enc["dino"]["strings"]]
-    bpp = sum(byte_len_items) * 8.0 / num_pixels
-
-    iqa_result = {
-        key: func(out_dec["rec1"], x).item() for key, func in img_metrics.items()
+    dino_byte_len = [len(s[0]) for s in out_enc["dino"]["strings"]]
+    byte_len_list = {
+        "y": sum(dino_byte_len[:-1]),
+        "z": dino_byte_len[-1],
+        "vq": len(out_enc["vqgan"]["strings"][0]),
     }
+    bpp_items = {
+        f"bpp_{name}": (length * 8.0 / num_pixels)
+        for name, length in byte_len_list.items()
+    }
+    bpp = sum(byte_len_list.values()) * 8.0 / num_pixels
+
     org_result = {
         "enc_time": enc_time,
         "dec_time": dec_time,
         "bpp": bpp,
     }
+    org_result.update(bpp_items)
     org_result.update(iqa_result)
     return org_result
 
 
 @torch.inference_mode()
-def inference_esti(model, x, fout=""):
+def inference_esti(model, x, fout="", recon=2, lnclf_head=None):
     x = x.unsqueeze(0)
     x_padded, padding = pad_centering(x, 128)
 
     start = time.time()
-    out_net = model.forward(x_padded)
+    out_net = model.forward_test(
+        x_padded, return_rec1=(recon == 1), return_rec2=(recon == 2), return_lnclf=True
+    )
     elapsed_time = time.time() - start
 
-    out_net["x_hat"].clamp_(0, 1)
-    out_net["x_hat"] = unpad_centering(out_net["x_hat"], padding)
+    iqa_result = {}
+    if recon != 0:
+        x_hat = out_net["rec2" if recon == 2 else "rec1"]
+        x_hat.clamp_(0, 1)
+        x_hat = unpad_centering(x_hat, padding)
 
-    if fout:
-        img = torch2img(out_net["x_hat"])
-        img.save(fout)
+        if fout:
+            img = torch2img(x_hat)
+            img.save(fout)
 
-    num_pixels = x.size(0) * x.size(2) * x.size(3)
-    bpp_items = [
-        (torch.log(likelihoods).sum() / (-math.log(2) * num_pixels))
-        for likelihoods in out_net["likelihoods"].values()
-    ]
-    bpp = sum(bpp_items).item()
+        iqa_result = {key: func(x_hat, x).item() for key, func in img_metrics.items()}
 
-    iqa_result = {
-        key: func(out_net["x_hat"], x).item() for key, func in img_metrics.items()
-    }
-    org_result = {
-        "enc_time": elapsed_time / 2.0,  # broad estimation
-        "dec_time": elapsed_time / 2.0,
-        "bpp": bpp,
-    }
-    org_result.update(iqa_result)
-    return org_result
-
-
-@torch.inference_mode()
-def inference_esti_only_bpp(model, x, fout=""):
-    x = x.unsqueeze(0)
-    x_padded, padding = pad_centering(x, 128)
-
-    start = time.time()
-    out_net = model.forward(x_padded)
-    elapsed_time = time.time() - start
+    if lnclf_head:
+        predict_lables = lnclf_head.predict(out_net["lnclf"], topk=5)
+        # convert to list and save to txt
+        predict_lables = predict_lables.tolist()
+        with open(fout + ".lnclf.txt", "w") as f:
+            for label in predict_lables:
+                f.write(f"{label}\n")
 
     num_pixels = x.size(0) * x.size(2) * x.size(3)
-    bpp_items = [
-        (torch.log(likelihoods).sum() / (-math.log(2) * num_pixels))
-        for likelihoods in out_net["likelihoods"].values()
-    ]
-    bpp = sum(bpp_items).item()
+    bpp_items = {
+        f"bpp_{name}": (
+            torch.log(likelihoods).sum() / (-math.log(2) * num_pixels)
+        ).item()
+        for name, likelihoods in out_net["likelihoods"].items()
+    }
+    bpp = sum(bpp_items.values())
 
     org_result = {
         "enc_time": elapsed_time / 2.0,  # broad estimation
         "dec_time": elapsed_time / 2.0,
         "bpp": bpp,
     }
+    org_result.update(bpp_items)
+    org_result.update(iqa_result)
     return org_result
 
 
@@ -322,12 +328,9 @@ def eval_model(model, quality, args, lnclf_head=None):
             x = x.half()
         if args.real:
             model.update()
-            rv = inference_real(model, x, fout, lnclf_head)
+            rv = inference_real(model, x, fout, recon=args.recon, lnclf_head=lnclf_head)
         else:
-            if args.only_bpp:
-                rv = inference_esti_only_bpp(model, x, fout)
-            else:
-                rv = inference_esti(model, x, fout)
+            rv = inference_esti(model, x, fout, recon=args.recon, lnclf_head=lnclf_head)
         for k, v in rv.items():
             avg_metrics[k] += v
 
@@ -337,12 +340,12 @@ def eval_model(model, quality, args, lnclf_head=None):
             print(file, _rv)
         rv = {key: round(value, 8) for key, value in rv.items()}
         record.update(rv)
-        print(record)
+        # print(record)
         records.append(record)
     for k, v in avg_metrics.items():
         avg_metrics[k] = v / len(filepaths)
         avg_metrics[k] = round(avg_metrics[k], 6)
-    if not args.only_bpp:
+    if args.recon != 0:
         iqa_result = {
             key: func(args.input_dir, out_sub_dir) for key, func in dist_metrics.items()
         }
@@ -399,8 +402,10 @@ def setup_args():
     parser.add_argument("-r", "--result", type=str, help="result file path")
     parser.add_argument("-v", "--verbose", action="store_true", help="verbose mode")
     parser.add_argument("--label", default="", type=str, help="name label")
-    parser.add_argument("--only-bpp", action="store_true", help="only calculate bpp")
-    parser.add_argument("--lnclf", action="store_true", help="use linear clf")
+    parser.add_argument(
+        "--recon", type=int, choices=[0, 1, 2], default=2, help="recon which layer"
+    )
+    parser.add_argument("--lnclf", action="store_true", help="use linear classifier")
     parser.add_argument("--mmseg", action="store_true", help="use mmsegmentation")
     return parser
 
@@ -425,8 +430,7 @@ def main(argv):
 
     if args.experiment:
         args.checkpoints = [
-            f"exp/{args.experiment}/{q}/runner.last.pth.tar"
-            for q in args.qualities
+            f"exp/{args.experiment}/{q}/runner.last.pth.tar" for q in args.qualities
         ]
 
     assert len(args.checkpoints) == len(args.qualities), (
@@ -458,8 +462,12 @@ def main(argv):
         model.eval()
 
         if args.lnclf:
-            base_path = os.path.realpath(os.path.join(os.path.dirname(__file__), "../../data"))
-            head_checkpoint_path = f"{base_path}/models/clf_head/dinov2_vits14_linear4_head.pth"
+            base_path = os.path.realpath(
+                os.path.join(os.path.dirname(__file__), "../../data")
+            )
+            head_checkpoint_path = (
+                f"{base_path}/models/clf_head/dinov2_vits14_linear4_head.pth"
+            )
             lnclf_head = Dinov2ClassifierHead(384, 4, head_checkpoint_path)
             lnclf_head.eval()
             if args.cuda and torch.cuda.is_available():
@@ -468,26 +476,11 @@ def main(argv):
         avg_metrics, records = eval_model(model, quality, args, lnclf_head)
         mem = torch.cuda.max_memory_allocated(device=None)  # bytes
         print(f"After eval_model, GPU mem: \t{mem / (2**30)}GB")
-        # avg_metrics = {}
-    
-        # if args.lnclf:
-        #     lnclf_result = run_linear_s_4(model.dino_eval_linear, valdir="val-256-768")
-        #     avg_metrics.update(lnclf_result)
-        #     mem = torch.cuda.max_memory_allocated(device=None)  # bytes
-        #     print(f"After eval_lnclf, GPU mem: \t{mem / (2**30)}GB")
-        
+
         del model
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
-
-        if args.mmseg:
-            config_file = os.path.abspath(config_file)
-            ckpt_file = os.path.abspath(ckpt_file)
-            mmseg_result = eval_mmseg(config_file, ckpt_file)
-            avg_metrics.update(mmseg_result)
-            mem = torch.cuda.max_memory_allocated(device=None)  # bytes
-            print(f"After eval_mmseg, GPU mem: \t{mem / (2**30)}GB")
 
         all_records.extend(records)
         for k, v in avg_metrics.items():
@@ -509,39 +502,7 @@ def main(argv):
             json.dump(result, f, indent=2)
 
 
-def eval_mmseg(config_file, ckpt_file):
-    print("Evaluating mmseg...")
-    """运行mmseg评估并返回指标结果"""
-
-    cmd = f"cd /home/faymek/MPCompress/DINOv2_mmseg && /home/faymek/.cache/pypoetry/virtualenvs/mpcompress-ZefffXH4-py3.10/bin/python test_pretrained_mpc.py small ade20k ms {config_file} {ckpt_file}"
-    print(cmd)
-    
-    try:
-        # 运行命令并捕获输出
-        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, universal_newlines=True, shell=True)
-        # print(output)
-        
-        # 查找最后一行指标信息
-        lines = output.strip().split('\n')
-        for line in reversed(lines):
-            if "mIoU" in line:
-                # 提取指标值
-                metrics = {}
-                pattern = r'(\w+): (\d+\.\d+)'
-                matches = re.findall(pattern, line)
-                for metric, value in matches:
-                    if metric in ["mIoU", "aAcc", "mAcc"]:
-                        metrics[metric] = float(value)
-                return metrics
-                
-        print("错误: 未找到mIoU指标信息")
-        return {}
-    except subprocess.CalledProcessError as e:
-        print(f"命令执行失败: {e}")
-        print(f"错误输出: {e.output}")
-        return {}
 
 
 if __name__ == "__main__":
     main(sys.argv[1:])
-
