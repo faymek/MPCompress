@@ -41,7 +41,8 @@ class VQModel(nn.Module):
             self.register_buffer("colorize", torch.randn(3, colorize_nlabels, 1, 1))
 
     def init_from_ckpt(self, path, ignore_keys=list()):
-        sd = torch.load(path, map_location="cpu")["state_dict"]
+        print("Load vqgan checkpoint from local path: ", path)
+        sd = torch.load(path, map_location="cpu", weights_only=False)["state_dict"]
         keys = list(sd.keys())
         for k in keys:
             for ik in ignore_keys:

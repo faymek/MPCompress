@@ -452,7 +452,7 @@ def main(argv):
             raise SystemExit(1)
         cfg = OmegaConf.load(config_file)
         model: nn.Module = instantiate_class(cfg.model).to(DEVICE)
-        checkpoint = torch.load(ckpt_file, map_location="cpu")
+        checkpoint = torch.load(ckpt_file, map_location="cpu", weights_only=True)
         sd_org = checkpoint["state_dict"]
         model.load_state_dict(sd_org, strict=True)
         model.eval()
