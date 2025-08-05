@@ -1182,23 +1182,91 @@ class MPC12_VQGAN(CompressionModel):
             "likelihoods": y_out["likelihoods"],
         }
 
-    def dino_eval_linear_no_compression(self, x, n=4):  # for lic training
+    def forward_test(
+        self,
+        x,
+        return_rec1=False,
+        return_rec2=False,
+        return_lnclf=False,
+        return_mmseg=False,
+    ):  # for lic training
         with torch.inference_mode():
+            results = {}
+            h_vqgan = self.vqgan.quant_conv(self.vqgan.encoder(2 * x - 1))
+            h_vqgan_ctx, _, _ = self.vqgan.quantize(h_vqgan)
+
             x_dino = self.dino_input_transform(x)
-            feat = self.dino.feature_startpart(x_dino, slot=self.slot)
-            feat_out = self.dino.feature_endpart(
-                feat,
-                slot=self.slot,
-                n=n,
-                reshape=False,
-                return_class_token=True,
-                norm=True,
+            h_dino = self.dino.feature_startpart(x_dino, slot=self.slot)
+
+            if return_rec1:
+                _h_vqgan_hat = self.vqgan.decoder(
+                    self.vqgan.post_quant_conv(h_vqgan_ctx)
+                )
+                x_hat = (_h_vqgan_hat + 1.0) / 2.0
+                results["rec1"] = x_hat
+
+            h_vqgan_ctx_down = self.vqgan_down(h_vqgan_ctx)
+
+            h = self.pre_vit_blocks(h_dino)[:, 1:].contiguous()  # (B, 256, 384)
+            token_H = x.shape[2] // self.patch_size
+            token_W = x.shape[3] // self.patch_size
+            token_res = (token_H, token_W)
+            h = rearrange(h, "B (H W) C -> B C H W", H=token_H, W=token_W)
+            h = self.mp12_enc(torch.cat([h, h_vqgan_ctx], dim=1))
+            y = self.f_a(h)
+            y_out = self.latent_codec(y, h_vqgan_ctx_down)
+            y_hat = y_out["y_hat"]
+
+            h_hat = self.f_s(y_hat)
+
+            if return_rec2:
+                h_vqgan_hat = self.dec1(torch.cat([h_hat.detach(), h_vqgan_ctx], dim=1))
+                _h_vqgan_hat = self.vqgan.decoder(
+                    self.vqgan.post_quant_conv(h_vqgan_hat)
+                )
+                x_hat = (_h_vqgan_hat + 1) / 2
+                results["rec2"] = x_hat
+
+            _h_dion_hat = self.dec2(torch.cat([h_hat, h_vqgan_ctx], dim=1))
+            _h_dion_hat = rearrange(_h_dion_hat, "B C H W -> B (H W) C")
+            _h_dion_hat = torch.cat(
+                [self.post_reg_tokens.expand(x.shape[0], -1, -1), _h_dion_hat], dim=1
             )
-        return feat_out
+            h_dino_hat = self.post_vit_blocks(_h_dion_hat)
+
+            if return_lnclf:
+                feat_out = self.dino.feature_endpart(
+                    h_dino_hat,
+                    slot=self.slot,
+                    n=4,
+                    token_res=None,
+                    reshape=False,
+                    return_class_token=True,
+                    norm=True,
+                )
+                results["lnclf"] = feat_out
+
+            if return_mmseg:
+                feat_out = self.dino.feature_endpart(
+                    h_dino_hat,
+                    slot=self.slot,
+                    n=4,
+                    token_res=token_res,
+                    reshape=True,
+                    return_class_token=False,
+                    norm=True,
+                )
+                results["mmseg"] = feat_out
+
+            results["likelihoods"] = y_out["likelihoods"]
+            results["likelihoods"]["z_q"] = self.vqgan.get_uniform_likelihood_for_z_q(
+                h_vqgan_ctx
+            )
+            return results
 
     def compress(self, x):
         with torch.inference_mode():
-            x = center_padding(x, patch_size=128)
+            # x = center_padding(x, patch_size=128)
 
             # compress vqgan
             h_vqgan = self.vqgan.quant_conv(self.vqgan.encoder(2 * x - 1))
@@ -1229,14 +1297,20 @@ class MPC12_VQGAN(CompressionModel):
             "dino": {
                 "strings": outputs["strings"],
                 "shape": outputs["shape"],
-                # "y_hat": outputs["y_hat"],
                 "token_res": (LH, LW),
-            }
+            },
         }
         # print(extract_shapes(layer_outputs))
         return layer_outputs
 
-    def decompress(self, layer_outputs, return_rec1=False, return_rec2=False, return_lnclf=False, return_mmseg=False):
+    def decompress(
+        self,
+        layer_outputs,
+        return_rec1=False,
+        return_rec2=False,
+        return_lnclf=False,
+        return_mmseg=False,
+    ):
         results = {}
         vqgan_string = layer_outputs["vqgan"]["strings"][0]
         vqgan_shape = layer_outputs["vqgan"]["shape"]
@@ -1247,7 +1321,9 @@ class MPC12_VQGAN(CompressionModel):
 
         # vqgan idx to z_q
         h_vqgan_ctx = self.vqgan.quantize.embedding(vq_idxs)
-        h_vqgan_ctx = rearrange(h_vqgan_ctx, "(H W) C -> 1 C H W", H=vqgan_shape[0], W=vqgan_shape[1])
+        h_vqgan_ctx = rearrange(
+            h_vqgan_ctx, "(H W) C -> 1 C H W", H=vqgan_shape[0], W=vqgan_shape[1]
+        )
 
         if return_rec1:
             _h_vqgan_hat = self.vqgan.decoder(self.vqgan.post_quant_conv(h_vqgan_ctx))
@@ -1262,7 +1338,7 @@ class MPC12_VQGAN(CompressionModel):
 
         y_out = self.latent_codec.decompress(dino_strings, dino_shape, h_vqgan_ctx_down)
         y_hat = y_out["y_hat"]
-        
+
         h_hat = self.f_s(y_hat)
 
         if return_rec2:
@@ -1303,114 +1379,6 @@ class MPC12_VQGAN(CompressionModel):
             results["mmseg"] = feat_out
 
         return results
-
-    def dino_eval_linear(self, x, n=4):  # for lic training
-        with torch.inference_mode():
-            x = center_padding(x, patch_size=128)
-
-            h_vqgan = self.vqgan.quant_conv(self.vqgan.encoder(2 * x - 1))
-            h_vqgan_ctx, _, _ = self.vqgan.quantize(h_vqgan)
-
-            x_dino = self.dino_input_transform(x)
-            B, C, H, W = x_dino.shape  # after padding
-            LH, LW = H // self.patch_size, W // self.patch_size
-
-            h_dino = self.dino.feature_startpart(x_dino, slot=self.slot)
-            h_vqgan_ctx_down = self.vqgan_down(h_vqgan_ctx)
-
-            h = self.pre_vit_blocks(h_dino)[:, 1:].contiguous()  # (B, 256, 384)
-            h = rearrange(h, "B (H W) C -> B C H W", H=LH, W=LW)
-            h = self.mp12_enc(torch.cat([h, h_vqgan_ctx], dim=1))
-            y = self.f_a(h)
-            y_out = self.latent_codec(y, h_vqgan_ctx_down)
-            y_hat = y_out["y_hat"]
-
-            h_hat = self.f_s(y_hat)
-            h_hat = self.dec2(torch.cat([h_hat, h_vqgan_ctx], dim=1))
-            _h_hat = rearrange(h_hat, "B C H W -> B (H W) C")
-            _h_hat = torch.cat(
-                [self.post_reg_tokens.expand(x.shape[0], -1, -1), _h_hat], dim=1
-            )
-            h_dino_hat = self.post_vit_blocks(_h_hat)
-
-            feat_out = self.dino.feature_endpart(
-                h_dino_hat,
-                slot=self.slot,
-                n=n,
-                token_res=None,
-                reshape=False,
-                return_class_token=True,
-                norm=True,
-            )
-
-        return feat_out
-
-    def eval_bpp(self, x, n=4):  # for lic training
-        with torch.inference_mode():
-            x = center_padding(x, patch_size=128)
-            h_vqgan = self.vqgan.quant_conv(self.vqgan.encoder(2 * x - 1))
-            h_vqgan_ctx, _, _ = self.vqgan.quantize(h_vqgan)
-
-            x_dino = self.dino_input_transform(x)
-            B, C, H, W = x_dino.shape  # after padding
-            LH, LW = H // self.patch_size, W // self.patch_size
-
-            h_dino = self.dino.feature_startpart(x_dino, slot=self.slot)
-            h_vqgan_ctx_down = self.vqgan_down(h_vqgan_ctx)
-
-            h = self.pre_vit_blocks(h_dino)[:, 1:].contiguous()  # (B, 256, 384)
-            h = rearrange(h, "B (H W) C -> B C H W", H=LH, W=LW)
-            h = self.mp12_enc(torch.cat([h, h_vqgan_ctx], dim=1))
-            y = self.f_a(h)
-            y_out = self.latent_codec(y, h_vqgan_ctx_down)
-
-        return {
-            "likelihoods": y_out["likelihoods"],
-        }
-
-    def dino_eval_mmseg(self, x, n=4):  # for lic training
-        with torch.inference_mode():
-            x = center_padding(x, patch_size=128)
-
-            h_vqgan = self.vqgan.quant_conv(self.vqgan.encoder(2 * x - 1))
-            h_vqgan_ctx, _, _ = self.vqgan.quantize(h_vqgan)
-
-            x_dino = self.dino_input_transform(x)
-            B, C, H, W = x_dino.shape  # after padding
-            LH, LW = H // self.patch_size, W // self.patch_size
-
-            h_dino = self.dino.feature_startpart(x_dino, slot=self.slot)
-            h_vqgan_ctx_down = self.vqgan_down(h_vqgan_ctx)
-
-            h = self.pre_vit_blocks(h_dino)[:, 1:].contiguous()  # (B, 256, 384)
-            h = rearrange(h, "B (H W) C -> B C H W", H=LH, W=LW)
-            h = self.mp12_enc(torch.cat([h, h_vqgan_ctx], dim=1))
-            y = self.f_a(h)
-            y_out = self.latent_codec(y, h_vqgan_ctx_down)
-            y_hat = y_out["y_hat"]
-
-            h_hat = self.f_s(y_hat)
-            h_hat = self.dec2(torch.cat([h_hat, h_vqgan_ctx], dim=1))
-            _h_hat = rearrange(h_hat, "B C H W -> B (H W) C")
-            _h_hat = torch.cat(
-                [self.post_reg_tokens.expand(x.shape[0], -1, -1), _h_hat], dim=1
-            )
-            h_dino_hat = self.post_vit_blocks(_h_hat)
-
-            feat_out = self.dino.feature_endpart(
-                h_dino_hat,
-                slot=self.slot,
-                n=n,
-                token_res=(LH, LW),
-                reshape=True,
-                return_class_token=False,
-                norm=True,
-            )
-
-        return feat_out
-
-
-
 
 
 

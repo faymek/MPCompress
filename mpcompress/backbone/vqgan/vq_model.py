@@ -72,6 +72,12 @@ class VQModel(nn.Module):
         dec = self.decode(quant)
         return dec, diff
 
+    def get_uniform_likelihood_for_z_q(self, z_q):
+        codebook_size = self.quantize.embedding.weight.size()[0]
+        likelihoods = torch.ones(z_q.shape[2:]) * (1.0 / codebook_size)
+        likelihoods = likelihoods.to(z_q.device)
+        return likelihoods
+
     def get_input(self, batch, k):
         x = batch[k]
         if len(x.shape) == 3:
