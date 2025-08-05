@@ -41,7 +41,10 @@ from compressai.latent_codecs import (
     HyperLatentCodec,
     HyperpriorLatentCodec,
 )
-from mpcompress.latent_codecs.ctx_hyper import HyperLatentCodecWithCtx, HyperpriorLatentCodecWithCtx
+from mpcompress.latent_codecs.ctx_hyper import (
+    HyperLatentCodecWithCtx,
+    HyperpriorLatentCodecWithCtx,
+)
 from compressai.layers import (
     AttentionBlock,
     CheckerboardMaskedConv2d,
@@ -493,7 +496,6 @@ class MPC2(Elic2022Official):
         return feat_out
 
 
-
 @register_model("MPC2_VQGAN")
 class MPC2_VQGAN(MPC2):
     def __init__(self, D_DINO, D_VQGAN, vqgan_config, **kwargs):
@@ -568,7 +570,6 @@ class MPC2_VQGAN(MPC2):
         }
 
 
-
 class HyperEncoderWithCtx(nn.Module):
     def __init__(self, N, M, D_VQGAN):
         super().__init__()
@@ -641,7 +642,14 @@ class MPC12(Elic2022Official):
                 ),
             ]
         )
-        self.dino = Dinov2TimmBackbone(model_size="small", img_size=256, patch_size=patch_size, dynamic_size=True, n_last_blocks=4, autocast_ctx=torch.float)
+        self.dino = Dinov2TimmBackbone(
+            model_size="small",
+            img_size=256,
+            patch_size=patch_size,
+            dynamic_size=True,
+            n_last_blocks=4,
+            autocast_ctx=torch.float,
+        )
         self.post_reg_tokens = nn.Parameter(torch.zeros(1, D_DINO), requires_grad=True)
         self.pre_vit_blocks = nn.Sequential(
             *[Block(dim=D_DINO, num_heads=D_DINO // 64, mlp_ratio=4) for _ in range(2)]
@@ -650,9 +658,8 @@ class MPC12(Elic2022Official):
             *[Block(dim=D_DINO, num_heads=D_DINO // 64, mlp_ratio=4) for _ in range(2)]
         )
 
-
         self.mp12_enc = nn.Sequential(
-            conv(D_DINO+D_VQGAN, D_DINO, kernel_size=3, stride=1),
+            conv(D_DINO + D_VQGAN, D_DINO, kernel_size=3, stride=1),
             nn.ReLU(inplace=True),
             conv(D_DINO, D_DINO, kernel_size=3, stride=1),
         )
@@ -669,7 +676,7 @@ class MPC12(Elic2022Official):
         )
 
         self.mp12_dec = nn.Sequential(
-            conv(D_DINO+D_VQGAN, D_DINO, kernel_size=3, stride=1),
+            conv(D_DINO + D_VQGAN, D_DINO, kernel_size=3, stride=1),
             nn.ReLU(inplace=True),
             conv(D_DINO, D_DINO, kernel_size=3, stride=1),
         )
@@ -762,7 +769,11 @@ class MPC12(Elic2022Official):
     def from_state_dict(cls, state_dict, config, strict=True):
         """Return a new model instance from `state_dict`."""
         net = cls(**config.ee_model.params)
-        state_dict = {k: v for k, v in state_dict.items() if not k.startswith("dino.") and not k.startswith("vqgan.")}
+        state_dict = {
+            k: v
+            for k, v in state_dict.items()
+            if not k.startswith("dino.") and not k.startswith("vqgan.")
+        }
         net.load_state_dict(state_dict, strict=strict)
         return net
 
@@ -832,7 +843,7 @@ class MPC12(Elic2022Official):
     def dino_eval_linear(self, x, n=4):  # for lic training
         with torch.inference_mode():
             x = center_padding(x, patch_size=128)
-            
+
             h_vqgan = self.vqgan.quant_conv(self.vqgan.encoder(2 * x - 1))
             h_vqgan_ctx, _, _ = self.vqgan.quantize(h_vqgan)
 
@@ -1141,7 +1152,9 @@ class MPC12_VQGAN(CompressionModel):
         h_vqgan_hat = self.dec1(torch.cat([h_hat.detach(), h_vqgan_ctx], dim=1))
         if not self.training:
             with torch.no_grad():
-                _h_vqgan_hat = self.vqgan.decoder(self.vqgan.post_quant_conv(h_vqgan_hat))
+                _h_vqgan_hat = self.vqgan.decoder(
+                    self.vqgan.post_quant_conv(h_vqgan_hat)
+                )
                 x_hat = (_h_vqgan_hat + 1) / 2
         else:
             x_hat = None
