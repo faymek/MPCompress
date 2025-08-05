@@ -29,6 +29,7 @@
 
 from typing import Any, Dict, List, Tuple, Mapping
 
+import torch
 import torch.nn as nn
 
 from torch import Tensor
@@ -38,12 +39,21 @@ from compressai.ops import quantize_ste
 from compressai.registry import register_module
 
 from compressai.latent_codecs.base import LatentCodec
+from compressai.latent_codecs.channel_groups import ChannelGroupsLatentCodec
 
 __all__ = [
     "HyperLatentCodecWithCtx",
     "HyperpriorLatentCodecWithCtx",
+    "ChannelGroupsLatentCodecContiguous",
 ]
 
+@register_module("ChannelGroupsLatentCodecContiguous")
+class ChannelGroupsLatentCodecContiguous(ChannelGroupsLatentCodec):
+    # monkey patch to make the ch ctx params consistent within compress and decompress
+    def merge_y(self, *args):
+        return torch.cat(args, dim=1).contiguous()
+        
+        
 
 @register_module("HyperLatentCodecWithCtx")
 class HyperLatentCodecWithCtx(LatentCodec):

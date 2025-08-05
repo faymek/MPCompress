@@ -44,6 +44,7 @@ from compressai.latent_codecs import (
 from mpcompress.latent_codecs.ctx_hyper import (
     HyperLatentCodecWithCtx,
     HyperpriorLatentCodecWithCtx,
+    ChannelGroupsLatentCodecContiguous,
 )
 from compressai.layers import (
     AttentionBlock,
@@ -1088,7 +1089,7 @@ class MPC12_VQGAN(CompressionModel):
         self.latent_codec = HyperpriorLatentCodecWithCtx(
             latent_codec={
                 # Channel groups with space-channel context model (SCCTX):
-                "y": ChannelGroupsLatentCodec(
+                "y": ChannelGroupsLatentCodecContiguous(
                     groups=self.groups,
                     channel_context=channel_context,
                     latent_codec=scctx_latent_codec,
@@ -1115,10 +1116,26 @@ class MPC12_VQGAN(CompressionModel):
         net.load_state_dict(state_dict, strict=strict)
         return net
 
+    def vqgan_get_ctx(self, x):
+        # x: (B, 3, H, W), 0-1 range
+        # note that z_q' = z + (z_q - z).detach()
+        # this incurs a small MSE(z_q', z_q) = 1e-18
+        # so we use z_q as the context to the MPC model
+        z = self.vqgan.quant_conv(self.vqgan.encoder(2 * x - 1))
+        z_q_prime, _, (_, _, idxs) = self.vqgan.quantize(z)
+        z_shape = z_q_prime.shape[-2:]
+        idxs = idxs.long().cuda()
+        z_q = self.vqgan.quantize.embedding(idxs)
+        z_q = rearrange(
+            z_q, "(B H W) C -> B C H W", B=x.shape[0], H=z_shape[0], W=z_shape[1]
+        )
+        return {"z": z, "z_q": z_q, "idx": idxs, "shape": z_shape}
+
     def forward(self, x):  # for lic training
         with torch.inference_mode():
-            h_vqgan = self.vqgan.quant_conv(self.vqgan.encoder(2 * x - 1))
-            h_vqgan_ctx, _, _ = self.vqgan.quantize(h_vqgan)
+            vqgan_res = self.vqgan_get_ctx(x)
+            h_vqgan = vqgan_res["z"]
+            h_vqgan_ctx = vqgan_res["z_q"]
 
             x_dino = self.dino_input_transform(x)
             h_dino = self.dino.feature_startpart(x_dino, slot=self.slot)
@@ -1141,10 +1158,7 @@ class MPC12_VQGAN(CompressionModel):
         h = self.mp12_enc(torch.cat([h, h_vqgan_ctx], dim=1))
         y = self.f_a(h)
         y_out = self.latent_codec(y, h_vqgan_ctx_down)
-        # test here
-        # outputs = self.latent_codec.compress(y, h_vqgan_ctx_down)
-        # print(extract_shapes(outputs))
-        # raise
+
         y_hat = y_out["y_hat"]
 
         h_hat = self.f_s(y_hat)
@@ -1192,8 +1206,8 @@ class MPC12_VQGAN(CompressionModel):
     ):  # for lic training
         with torch.inference_mode():
             results = {}
-            h_vqgan = self.vqgan.quant_conv(self.vqgan.encoder(2 * x - 1))
-            h_vqgan_ctx, _, _ = self.vqgan.quantize(h_vqgan)
+            vqgan_res = self.vqgan_get_ctx(x)
+            h_vqgan_ctx = vqgan_res["z_q"]
 
             x_dino = self.dino_input_transform(x)
             h_dino = self.dino.feature_startpart(x_dino, slot=self.slot)
@@ -1266,11 +1280,10 @@ class MPC12_VQGAN(CompressionModel):
 
     def compress(self, x):
         with torch.inference_mode():
-            # x = center_padding(x, patch_size=128)
-
             # compress vqgan
-            h_vqgan = self.vqgan.quant_conv(self.vqgan.encoder(2 * x - 1))
-            h_vqgan_ctx, _, (_, _, vq_idxs) = self.vqgan.quantize(h_vqgan)
+            vqgan_res = self.vqgan_get_ctx(x)
+            h_vqgan_ctx = vqgan_res["z_q"]
+            vq_idxs = vqgan_res["idx"]
 
             alphabet_size = self.vqgan.quantize.embedding.weight.size()[0]
             vqgan_string = encode_uniform_to_bits(vq_idxs, alphabet_size)
@@ -1322,7 +1335,7 @@ class MPC12_VQGAN(CompressionModel):
         # vqgan idx to z_q
         h_vqgan_ctx = self.vqgan.quantize.embedding(vq_idxs)
         h_vqgan_ctx = rearrange(
-            h_vqgan_ctx, "(H W) C -> 1 C H W", H=vqgan_shape[0], W=vqgan_shape[1]
+            h_vqgan_ctx, "(B H W) C -> B C H W", B=1, H=vqgan_shape[0], W=vqgan_shape[1]
         )
 
         if return_rec1:
@@ -1379,6 +1392,3 @@ class MPC12_VQGAN(CompressionModel):
             results["mmseg"] = feat_out
 
         return results
-
-
-
