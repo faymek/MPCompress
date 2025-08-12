@@ -1,43 +1,8 @@
-# Copyright (c) 2021-2024, InterDigital Communications, Inc
-# All rights reserved.
-
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted (subject to the limitations in the disclaimer
-# below) provided that the following conditions are met:
-
-# * Redistributions of source code must retain the above copyright notice,
-#   this list of conditions and the following disclaimer.
-# * Redistributions in binary form must reproduce the above copyright notice,
-#   this list of conditions and the following disclaimer in the documentation
-#   and/or other materials provided with the distribution.
-# * Neither the name of InterDigital Communications, Inc nor the names of its
-#   contributors may be used to endorse or promote products derived from this
-#   software without specific prior written permission.
-
-# NO EXPRESS OR IMPLIED LICENSES TO ANY PARTY'S PATENT RIGHTS ARE GRANTED BY
-# THIS LICENSE. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
-# CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT
-# NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-# PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
-# CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-# EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
 from pathlib import Path
-
 from PIL import Image
 from torch.utils.data import Dataset
 
-from compressai.registry import register_dataset
 
-import numpy as np 
-
-
-@register_dataset("ImageFolder")
 class ImageFolder(Dataset):
     """Load an image folder database. Training and testing image samples
     are respectively stored in separate directories:
@@ -65,10 +30,12 @@ class ImageFolder(Dataset):
         if not splitdir.is_dir():
             raise RuntimeError(f'Missing directory "{splitdir}"')
 
-        # self.samples = sorted(f for f in splitdir.iterdir() if f.is_file())
         self.samples = sorted(f for f in splitdir.rglob("*") if f.is_file())
 
         self.transform = transform
+
+    def __len__(self):
+        return len(self.samples)
 
     def __getitem__(self, index):
         """
@@ -83,48 +50,163 @@ class ImageFolder(Dataset):
             return self.transform(img)
         return img
 
+
+class ClassificationDataset(Dataset):
+    """统一的图像文件夹数据集，支持分类和分割任务"""
+
+    def __init__(
+        self, root, transform=None, split="", file_list=None, labels_file=None, **kwargs
+    ):
+        """
+        参数:
+            root (str): 数据集根目录
+            transform (callable, optional): 数据预处理转换
+            split (str): 数据子集名称
+            file_list (str, optional): 文件列表路径，相对于root
+            labels_file (str, optional): 标签文件路径，相对于root
+            seg_map_path (str, optional): 分割标签路径，相对于root
+        """
+        self.root = Path(root)
+        self.transform = transform
+        self.split = split
+        self.file_list = file_list
+        self.labels_file = labels_file
+
+        # 确定数据目录
+        if self.split:
+            self.data_dir = self.root / self.split
+        else:
+            self.data_dir = self.root
+
+        if not self.data_dir.is_dir():
+            raise FileNotFoundError(f'Missing directory "{self.data_dir}"')
+
+        # 加载文件列表
+        if self.file_list and (self.root / self.file_list).exists():
+            with open(self.root / self.file_list, "r") as f:
+                self.samples = [line.strip() for line in f.readlines()]
+            # 确保文件路径是相对于data_dir的
+            self.samples = [str(self.data_dir / sample) for sample in self.samples]
+            self.samples = sorted(self.samples)
+        else:
+            # 如果没有指定file_list，则扫描目录
+            self.samples = sorted(
+                f
+                for f in self.data_dir.rglob("*")
+                if f.is_file()
+                and f.suffix.lower() in [".jpg", ".jpeg", ".png", ".bmp", ".tiff"]
+            )
+            self.samples = [str(f) for f in self.samples]
+
+        # 加载标签信息
+        if not self.labels_file:
+            raise ValueError("labels_file is required for classification dataset")
+        if not (self.root / self.labels_file).exists():
+            raise FileNotFoundError(f"labels_file {self.labels_file} not found")
+        self.labels_dict = {}
+        with open(self.root / self.labels_file, "r") as f:
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) >= 2:
+                    img_name = parts[0]
+                    label = int(parts[1])
+                    self.labels_dict[img_name] = label
+
     def __len__(self):
         return len(self.samples)
 
-
-class SmallImageNetDataset(Dataset):
-    """自定义数据集类,用于处理小型ImageNet数据集,包含train/val/test三个子文件夹和labels.txt标签文件"""
-
-    def __init__(self, root, transform=None, split="train"):
-        """
-        参数:
-            root (str): 数据集根目录,包含train/val/test子文件夹和labels.txt
-            transform (callable, optional): 数据预处理转换
-            split (str): 使用的数据子集,可选'train'/'val'/'test'
-        """
-        splitdir = Path(root) / split
-
-        if not splitdir.is_dir():
-            raise RuntimeError(f'Missing directory "{splitdir}"')
-
-        self.samples = sorted(f for f in splitdir.rglob("*") if f.is_file())
-        self.transform = transform
-
-        # 读取标签文件
-        self.labels = {}
-        label_file = Path(root) / 'labels.txt'
-        with open(label_file, 'r') as f:
-            for line in f:
-                img_name, label = line.strip().split()
-                self.labels[img_name] = int(label)
-
     def __getitem__(self, index):
-
+        """返回 (img, img_meta)"""
         img_path = self.samples[index]
+        img_name = Path(img_path).stem
+
         img = Image.open(img_path).convert("RGB")
-        
         if self.transform:
             img = self.transform(img)
 
-        img_name = img_path.stem
-        target = self.labels[img_name]
-            
-        return img, target, img_name
+        # 加载图像
+        img = Image.open(img_path).convert("RGB")
+        if self.transform:
+            img = self.transform(img)
+
+        img_meta = {
+            "img_path": img_path,
+            "img_name": img_name,
+            "ori_size": img.size if hasattr(img, "size") else img.shape[-2:],
+            "target": self.labels_dict.get(img_name, None),
+        }
+
+        return img, img_meta
+
+
+class SegmentationDataset(Dataset):
+    def __init__(
+        self,
+        root,
+        transform=None,
+        img_path="JPEGImages",
+        seg_map_path="SegmentationClass",
+        file_list=None,
+        **kwargs,
+    ):
+        """
+        参数:
+            root (str): 数据集根目录
+            transform (callable, optional): 数据预处理转换
+            img_path (str): 图像目录名
+            seg_map_path (str): 分割标签目录名
+            file_list (str, optional): 文件列表路径
+        """
+        super().__init__()
+
+        self.root = Path(root)
+        self.transform = transform
+        self.img_path = img_path
+        self.seg_map_path = seg_map_path
+        self.file_list = file_list
+
+        img_dir = self.root / self.img_path
+        if not img_dir.is_dir():
+            raise RuntimeError(f'Missing directory "{img_dir}"')
+
+        # 加载文件列表
+        if self.file_list and (self.root / self.file_list).exists():
+            with open(self.root / self.file_list, "r") as f:
+                self.samples = [line.strip() for line in f.readlines()]
+            self.samples = [
+                str(img_dir / f"{img_name}.jpg") for img_name in self.samples
+            ]
+        else:
+            # 如果没有指定file_list，则扫描目录
+            self.samples = sorted(f for f in img_dir.rglob("*.jpg"))
+            self.samples = [str(f) for f in self.samples]
 
     def __len__(self):
         return len(self.samples)
+
+    def __getitem__(self, index):
+        """返回 (img, img_meta)"""
+        img_path = self.samples[index]
+        img_name = Path(img_path).stem
+
+        # 加载图像
+        img = Image.open(img_path).convert("RGB")
+        if self.transform:
+            img = self.transform(img)
+
+        img_meta = {
+            "img_path": img_path,
+            "img_name": img_name,
+            "ori_size": img.size if hasattr(img, "size") else img.shape[-2:],
+            "seg_label_path": str(self.root / self.seg_map_path / f"{img_name}.png"),
+        }
+
+        return img, img_meta
+
+
+class VOC2012Dataset(SegmentationDataset):
+    pass
+
+
+class ADE20KDataset(SegmentationDataset):
+    pass
