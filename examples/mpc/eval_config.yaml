@@ -1,0 +1,161 @@
+# 统一的评估配置文件
+# 测试时指定使用哪个dataset和哪些head
+
+# 模型配置
+model:
+  type: MPC12_VQGAN_new
+  'N': 192
+  M: 48
+  D: 256
+  D_DINO: 384
+  D_VQGAN: 256
+  groups: 16
+  dynamic_size: true
+  patch_size: 16
+  dino_config:
+    model_size: small
+    img_size: 256
+    patch_size: 16
+    dynamic_size: true
+    n_last_blocks: 4
+  vqgan_config:
+    ckpt_path: /home/faymek/Models/kmeans_tune/16384_kmeans_1024_epoch/epoch1/checkpoints/last.ckpt
+    n_embed: 1024
+    embed_dim: 256
+    ddconfig:
+      double_z: false
+      z_channels: 256
+      resolution: 256
+      in_channels: 3
+      out_ch: 3
+      ch: 128
+      ch_mult:
+      - 1
+      - 1
+      - 2
+      - 2
+      - 4
+      num_res_blocks: 2
+      attn_resolutions:
+      - 16
+      dropout: 0.0
+
+# 数据集配置
+datasets:
+  # ImageNet分类数据集
+  imagenet_sel100:
+    type: ClassificationDataset
+    root: /home/faymek/MPCompress/data/dataset/ImageNet_val_sel100
+    split: val
+    labels_file: imagenet_val_labels.txt  # 可选
+    file_list: labels.txt  # 可选
+    
+  # VOC2012分割数据集
+  voc2012_sel20:
+    type: SegmentationDataset
+    root: /home/faymek/MPCompress/data/dataset/VOC2012
+    img_path: JPEGImages
+    seg_map_path: SegmentationClass
+    file_list: VOC2012_sel20.txt  # 可选
+
+  voc2012_val:
+    type: SegmentationDataset
+    root: /home/faymek/MPCompress/data/dataset/VOC2012
+    img_path: JPEGImages
+    seg_map_path: SegmentationClass
+    file_list: VOC2012_val.txt
+
+  # ADE20K分割数据集
+  ade20k_val:
+    type: SegmentationDataset
+    root:  /home/faymek/Datasets/ADEChallengeData2016
+    img_path: images/validation
+    seg_map_path: annotations/validation
+    file_list:
+
+# 头部模型配置
+heads:
+  # 分类头部
+  imagenet_cls_head:
+    type: Dinov2ClassifierHead
+    embed_dim: 384
+    layers: 4
+    checkpoint_path: /home/faymek/MPCompress/data/models/clf_head/dinov2_vits14_linear4_head.pth
+    
+  # VOC2012分割头部
+  voc2012_seg_head:
+    type: Dinov2SegmentationHead
+    in_channels: [384, 384, 384, 384]
+    in_index: [0, 1, 2, 3]
+    input_transform: resize_concat
+    channels: 1536
+    num_classes: 21
+    patch_size: 16
+    checkpoint: /home/faymek/MPCompress/data/models/seg_head/dinov2_vits14_voc2012_ms_head.pth
+    
+  # ADE20K分割头部
+  ade20k_seg_head:
+    type: Dinov2SegmentationHead
+    in_channels: [384, 384, 384, 384]
+    in_index: [0, 1, 2, 3]
+    input_transform: resize_concat
+    channels: 1536
+    num_classes: 150
+    patch_size: 16
+    checkpoint: /home/faymek/MPCompress/data/models/seg_head/dinov2_vits14_ade20k_ms_head.pth
+
+# 评估指标配置
+metrics:
+  # 分类指标
+  cls_metrics:
+    type: TopKAccuracyMetric
+    topk: [1, 5]
+    
+  # VOC2012分割指标
+  voc2012_seg_metrics:
+    type: MeanIoUMetric
+    num_classes: 21
+    
+  # ADE20K分割指标
+  ade20k_seg_metrics:
+    type: MeanIoUMetric
+    num_classes: 150
+
+# 评估任务配置
+eval_tasks:
+  # ImageNet分类任务
+  imagenet_sel100_cls:
+    dataset: imagenet_sel100
+    head: imagenet_cls_head
+    metric: cls_metrics
+    description: "ImageNet分类任务评估(100张图)"
+    
+  # VOC2012分割任务
+  voc2012_sel20_seg:
+    dataset: voc2012_sel20
+    head: voc2012_seg_head
+    metric: voc2012_seg_metrics
+    description: "VOC2012分割任务评估"
+
+  voc2012_val_seg:
+    dataset: voc2012_val
+    head: voc2012_seg_head
+    metric: voc2012_seg_metrics
+    description: "VOC2012分割任务评估"
+    
+  # ADE20K分割任务
+  ade20k_val_seg:
+    dataset: ade20k_val
+    head: ade20k_seg_head
+    metric: ade20k_seg_metrics
+    description: "ADE20K分割任务评估"
+
+# 杂项配置
+args:
+  # 全局评估参数
+  real: false  # 是否使用实际压缩
+  recon: 2     # 重建层 (0, 1, 2)
+  verbose: true
+  output_dir: /home/faymek/MPCompress/eval_results
+  save_images: true  # 是否保存重建图像
+  save_predictions: true  # 是否保存预测结果 
