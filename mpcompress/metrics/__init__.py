@@ -1,4 +1,5 @@
-from .metrics import DictAverageMeter, TopKAccuracyMetric, MeanIoUMetric
+from .utils import DictAverageMeter
+from .cv_metrics import TopKAccuracyMetric, MeanIoUMetric
 
 __all__ = [
     "DictAverageMeter",
