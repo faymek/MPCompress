@@ -4,7 +4,6 @@ Evaluate an end-to-end compression model on an image dataset.
 
 import os
 import re
-import subprocess
 import sys
 import time
 import glob
@@ -22,23 +21,17 @@ from torchvision.transforms import ToPILImage, ToTensor
 from pytorch_msssim import ms_ssim
 
 import compressai
-import compressai.models
 from compressai.registry import MODELS
 import pyiqa
 import importlib
 from omegaconf import OmegaConf
 from mpcompress.models.mpc import *
-from mpcompress.heads import Dinov2ClassifierHead
+from mpcompress.heads import Dinov2ClassifierHead, Dinov2SegmentationHead
 
-# from dinov2.eval.call_linear import run_linear_s_4, run_linear_s_1
-# import dinov2.distributed as distributed
 import clip
 import numpy as np
 from mpcompress.utils.utils import extract_shapes
 
-
-# torch.backends.cudnn.benchmark = True
-# distributed.enable(overwrite=True)
 
 for alias, cls in list(MODELS.items()):
     MODELS[cls.__name__] = cls
@@ -196,41 +189,7 @@ def unpad_centering(x, padding):
     )
 
 
-@torch.no_grad()
-def inference_real(model, x, fout="", recon=2, lnclf_head=None):
-    x = x.unsqueeze(0)
-    x_padded, padding = pad_centering(x, 128)
-
-    start = time.time()
-    out_enc = model.compress(x_padded)
-    enc_time = time.time() - start
-
-    start = time.time()
-    out_dec = model.decompress(
-        out_enc, return_rec1=(recon == 1), return_rec2=(recon == 2), return_lnclf=True
-    )
-    dec_time = time.time() - start
-
-    iqa_result = {}
-    if recon != 0:
-        x_hat = out_dec["rec2" if recon == 2 else "rec1"]
-        x_hat.clamp_(0, 1)
-        x_hat = unpad_centering(x_hat, padding)
-
-        if fout:
-            img = torch2img(x_hat)
-            img.save(fout)
-
-        iqa_result = {key: func(x_hat, x).item() for key, func in img_metrics.items()}
-
-    if lnclf_head:
-        predict_lables = lnclf_head.predict(out_dec["lnclf"], topk=5)
-        # convert to list and save to txt
-        predict_lables = predict_lables.tolist()
-        with open(fout + ".lnclf.txt", "w") as f:
-            for label in predict_lables:
-                f.write(f"{label}\n")
-
+def calc_real_bpp_items(out_enc, x):
     num_pixels = x.size(0) * x.size(2) * x.size(3)
     dino_byte_len = [len(s[0]) for s in out_enc["dino"]["strings"]]
     byte_len_list = {
@@ -242,28 +201,63 @@ def inference_real(model, x, fout="", recon=2, lnclf_head=None):
         f"bpp_{name}": (length * 8.0 / num_pixels)
         for name, length in byte_len_list.items()
     }
-    bpp = sum(byte_len_list.values()) * 8.0 / num_pixels
+    return bpp_items
 
-    org_result = {
-        "enc_time": enc_time,
-        "dec_time": dec_time,
-        "bpp": bpp,
+
+def calc_esti_bpp_items(out_net, x):
+    num_pixels = x.size(0) * x.size(2) * x.size(3)
+    bpp_items = {
+        f"bpp_{name}": (
+            torch.log(likelihoods).sum() / (-math.log(2) * num_pixels)
+        ).item()
+        for name, likelihoods in out_net["likelihoods"].items()
     }
-    org_result.update(bpp_items)
-    org_result.update(iqa_result)
-    return org_result
+    return bpp_items
 
 
 @torch.inference_mode()
-def inference_esti(model, x, fout="", recon=2, lnclf_head=None):
+def inference_file(model, x, fout="", real=False, recon=2, lnclf_head=None, mmseg_head=None):
     x = x.unsqueeze(0)
     x_padded, padding = pad_centering(x, 128)
 
-    start = time.time()
-    out_net = model.forward_test(
-        x_padded, return_rec1=(recon == 1), return_rec2=(recon == 2), return_lnclf=True
-    )
-    elapsed_time = time.time() - start
+    if real:  # real compression
+        start = time.time()
+        out_enc = model.compress(x_padded)
+        enc_time = time.time() - start
+        start = time.time()
+        out_net = model.decompress(
+            out_enc,
+            return_rec1=(recon == 1),
+            return_rec2=(recon == 2),
+            return_lnclf=(lnclf_head is not None),
+            return_mmseg=(mmseg_head is not None),
+        )
+        dec_time = time.time() - start
+        bpp_items = calc_real_bpp_items(out_enc, x)
+        bpp = sum(bpp_items.values())
+        org_result = {
+            "enc_time": enc_time,
+            "dec_time": dec_time,
+            "bpp": bpp,
+        }
+        
+    else:  # estimation 
+        start = time.time()
+        out_net = model.forward_test(
+            x_padded,
+            return_rec1=(recon == 1),
+            return_rec2=(recon == 2),
+            return_lnclf=(lnclf_head is not None),
+            return_mmseg=(mmseg_head is not None),
+        )
+        elapsed_time = time.time() - start
+        bpp_items = calc_esti_bpp_items(out_net, x)
+        bpp = sum(bpp_items.values())
+        org_result = {
+            "enc_time": elapsed_time / 2.0,  # broad estimation
+            "dec_time": elapsed_time / 2.0,
+            "bpp": bpp,
+        }
 
     iqa_result = {}
     if recon != 0:
@@ -285,26 +279,25 @@ def inference_esti(model, x, fout="", recon=2, lnclf_head=None):
             for label in predict_lables:
                 f.write(f"{label}\n")
 
-    num_pixels = x.size(0) * x.size(2) * x.size(3)
-    bpp_items = {
-        f"bpp_{name}": (
-            torch.log(likelihoods).sum() / (-math.log(2) * num_pixels)
-        ).item()
-        for name, likelihoods in out_net["likelihoods"].items()
-    }
-    bpp = sum(bpp_items.values())
+    if mmseg_head:
+        preds = mmseg_head.predict(out_net["mmseg"])
+        preds = unpad_centering(preds, padding)
+        seg_prob = F.softmax(preds, dim=1)
+        seg_index = seg_prob.argmax(dim=1)
 
-    org_result = {
-        "enc_time": elapsed_time / 2.0,  # broad estimation
-        "dec_time": elapsed_time / 2.0,
-        "bpp": bpp,
-    }
+        seg_map = seg_index.squeeze(0)
+        seg_map = seg_map * 12
+        seg_map = seg_map.cpu().numpy()
+        seg_map = seg_map.astype(np.uint8)
+        seg_map = Image.fromarray(seg_map)
+        seg_map.save(fout + ".seg.png")
+
     org_result.update(bpp_items)
     org_result.update(iqa_result)
     return org_result
 
 
-def eval_model(model, quality, args, lnclf_head=None):
+def eval_model(model, quality, args, lnclf_head=None, mmseg_head=None):
     device = next(model.parameters()).device
     avg_metrics = defaultdict(float)
     records = []
@@ -326,11 +319,18 @@ def eval_model(model, quality, args, lnclf_head=None):
         if args.half:
             model = model.half()
             x = x.half()
-        if args.real:
-            model.update()
-            rv = inference_real(model, x, fout, recon=args.recon, lnclf_head=lnclf_head)
-        else:
-            rv = inference_esti(model, x, fout, recon=args.recon, lnclf_head=lnclf_head)
+        
+        model.update()
+        rv = inference_file(
+            model,
+            x,
+            fout,
+            real=args.real,
+            recon=args.recon,
+            lnclf_head=lnclf_head,
+            mmseg_head=mmseg_head,
+        )
+
         for k, v in rv.items():
             avg_metrics[k] += v
 
@@ -461,6 +461,7 @@ def main(argv):
             model = model.to("cuda")
         model.eval()
 
+        lnclf_head = None
         if args.lnclf:
             base_path = os.path.realpath(
                 os.path.join(os.path.dirname(__file__), "../../data")
@@ -473,7 +474,28 @@ def main(argv):
             if args.cuda and torch.cuda.is_available():
                 lnclf_head = lnclf_head.to("cuda")
 
-        avg_metrics, records = eval_model(model, quality, args, lnclf_head)
+        mmseg_head = None
+        if args.mmseg:
+            base_path = os.path.realpath(
+                os.path.join(os.path.dirname(__file__), "../../data")
+            )
+            head_checkpoint_path = (
+                f"{base_path}/models/seg_head/dinov2_vits14_voc2012_ms_head.pth"
+            )
+            mmseg_head = Dinov2SegmentationHead(
+                in_channels=[384, 384, 384, 384],
+                in_index=[0, 1, 2, 3],
+                input_transform="resize_concat",
+                channels=1536,
+                num_classes=21,
+                patch_size=16,
+                checkpoint=head_checkpoint_path,
+            )
+            mmseg_head.eval()
+            if args.cuda and torch.cuda.is_available():
+                mmseg_head = mmseg_head.to("cuda")
+
+        avg_metrics, records = eval_model(model, quality, args, lnclf_head, mmseg_head)
         mem = torch.cuda.max_memory_allocated(device=None)  # bytes
         print(f"After eval_model, GPU mem: \t{mem / (2**30)}GB")
 
@@ -500,8 +522,6 @@ def main(argv):
     if args.result:
         with open(args.result, "w") as f:
             json.dump(result, f, indent=2)
-
-
 
 
 if __name__ == "__main__":
