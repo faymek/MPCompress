@@ -20,31 +20,34 @@ export HF_ENDPOINT=https://hf-mirror.com
 ## 测试方法
 
 ```bash
-# ImageNet分类任务
-python examples/mpc/run_mpc_eval.py \
-    --config examples/mpc/eval_config.yaml \
-    --checkpoint /path/to/model.pth \
-    --task imagenet_sel100_cls \
-    --quality 12.0 \
-    --cuda --verbose --real
+# MPC2 测试 ImageNet 分类任务
+python examples/mpc/run_eval_mpc.py \
+    --config examples/mpc/config/eval_base.yaml examples/mpc/config/eval_mpc2.yaml \
+    --checkpoint "" \
+    --task imagenet_sel2k_cls \
+    --quality 1.0 \
+    --cuda --recon 0 --real \
+    --output_dir eval_imagenet_sel2k_mpc2_real
 
-# VOC2012分割任务 
-python examples/mpc/run_mpc_eval.py \
-    --config examples/mpc/eval_config.yaml \
-    --checkpoint /path/to/model.pth \
-    --task voc2012_sel20_seg \
-    --quality 12.0 \
-    --cuda --verbose --real
+# MPC12 测试 VOC2012 分割任务 
+python examples/mpc/run_eval_mpc.py \
+    --config examples/mpc/config/eval_base.yaml examples/mpc/config/eval_mpc12.yaml \
+    --checkpoint "" \
+    --task voc2012_val_seg \
+    --quality 1.0 \
+    --cuda --recon 2 --real \
+    --output_dir eval_voc_val_mpc12_real
 ```
 
 参数说明：
 
-- `--config`: 配置文件路径
+- `--config`: 配置文件路径，可多个叠加
 - `--checkpoint`: 模型权重路径
 - `--task`: 任务名称，需要与配置文件中的任务名称一致
 - `--quality`: 质量因子，仅用作任务标签
 - `--cuda`: 使用CUDA
 - `--verbose`: 启用详细输出，打印每个文件的评估结果
+- `--recon`: 对于MPC模型，使用第几层分支的重建图像，当前可选[0,1,2]
 - `--real`: 启用真实熵编码，写入码流；否则使用码率估计，不写入码流
 
 

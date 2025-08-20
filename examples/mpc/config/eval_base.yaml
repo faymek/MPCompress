@@ -1,54 +1,22 @@
 # 统一的评估配置文件
 # 测试时指定使用哪个dataset和哪些head
 
-# 模型配置
-model:
-  type: MPC12_VQGAN_new
-  'N': 192
-  M: 48
-  D: 256
-  D_DINO: 384
-  D_VQGAN: 256
-  groups: 16
-  dynamic_size: true
-  patch_size: 16
-  dino_config:
-    model_size: small
-    img_size: 256
-    patch_size: 16
-    dynamic_size: true
-    n_last_blocks: 4
-  vqgan_config:
-    ckpt_path: /home/faymek/Models/kmeans_tune/16384_kmeans_1024_epoch/epoch1/checkpoints/last.ckpt
-    n_embed: 1024
-    embed_dim: 256
-    ddconfig:
-      double_z: false
-      z_channels: 256
-      resolution: 256
-      in_channels: 3
-      out_ch: 3
-      ch: 128
-      ch_mult:
-      - 1
-      - 1
-      - 2
-      - 2
-      - 4
-      num_res_blocks: 2
-      attn_resolutions:
-      - 16
-      dropout: 0.0
-
 # 数据集配置
 datasets:
   # ImageNet分类数据集
   imagenet_sel100:
     type: ClassificationDataset
     root: /home/faymek/MPCompress/data/dataset/ImageNet_val_sel100
-    split: val
+    split: img
     labels_file: imagenet_val_labels.txt  # 可选
     file_list: labels.txt  # 可选
+  
+  imagenet_sel2k:
+    type: ClassificationDataset
+    root: /home/faymek/MPCompress/data/dataset/ImageNet_val_sel2k
+    split: img
+    labels_file: imagenet_val_labels.txt  # 可选
+    file_list:
     
   # VOC2012分割数据集
   voc2012_sel20:
@@ -80,7 +48,7 @@ heads:
     type: Dinov2ClassifierHead
     embed_dim: 384
     layers: 4
-    checkpoint_path: /home/faymek/MPCompress/data/models/clf_head/dinov2_vits14_linear4_head.pth
+    checkpoint_path: /home/faymek/MPCompress/data/models/dinov2_cls_head/dinov2_vits14_linear4_head.pth
     
   # VOC2012分割头部
   voc2012_seg_head:
@@ -91,7 +59,7 @@ heads:
     channels: 1536
     num_classes: 21
     patch_size: 16
-    checkpoint: /home/faymek/MPCompress/data/models/seg_head/dinov2_vits14_voc2012_ms_head.pth
+    checkpoint: /home/faymek/MPCompress/data/models/dinov2_seg_head/dinov2_vits14_voc2012_ms_head.pth
     
   # ADE20K分割头部
   ade20k_seg_head:
@@ -102,7 +70,7 @@ heads:
     channels: 1536
     num_classes: 150
     patch_size: 16
-    checkpoint: /home/faymek/MPCompress/data/models/seg_head/dinov2_vits14_ade20k_ms_head.pth
+    checkpoint: /home/faymek/MPCompress/data/models/dinov2_seg_head/dinov2_vits14_ade20k_ms_head.pth
 
 # 评估指标配置
 metrics:
@@ -129,6 +97,12 @@ eval_tasks:
     head: imagenet_cls_head
     metric: cls_metrics
     description: "ImageNet分类任务评估(100张图)"
+
+  imagenet_sel2k_cls:
+    dataset: imagenet_sel2k
+    head: imagenet_cls_head
+    metric: cls_metrics
+    description: "ImageNet分类任务评估(2000张图)"
     
   # VOC2012分割任务
   voc2012_sel20_seg:

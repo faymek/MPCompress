@@ -1,0 +1,40 @@
+multi_run:
+  q0300:
+    ckpt_path: /home/faymek/MPCompress/exp/MPC2-new/Q3.0/runner.best.pth.tar
+  # q0600:
+  #   ckpt_path: /home/faymek/MPCompress/exp/MPC2-new/Q6.0/runner.best.pth.tar
+  # q1200:
+  #   ckpt_path: /home/faymek/MPCompress/exp/MPC2-new/Q12.0/runner.best.pth.tar
+  # q2400:
+  #   ckpt_path: /home/faymek/MPCompress/exp/MPC2-new/Q24.0/runner.best.pth.tar
+  # q4800:
+  #   ckpt_path: /home/faymek/MPCompress/exp/MPC2-new/Q48.0/runner.best.pth.tar
+
+load:
+  path: /home/faymek/MPCompress/exp/MPC2-new/Q3.0/runner.best.pth.tar
+  strict: true
+  rules: # type, pattern, replacement
+    - ["startswith", "post_reg_tokens", "dino_codec.post_reg_tokens"]
+    - ["startswith", "pre_vit_blocks.", "dino_codec.pre_vit_blocks."]
+    - ["startswith", "post_vit_blocks.", "dino_codec.post_vit_blocks."]
+    - ["startswith", "f_a.", "dino_codec.f_a."]
+    - ["startswith", "f_s.", "dino_codec.f_s."]
+    - ["startswith", "latent_codec.", "dino_codec.latent_codec."]
+
+model: 
+  type: MPC_I2
+  
+  dino_backbone:
+    model_size: small
+    img_size: 256
+    patch_size: 16
+    dynamic_size: true
+    slot: -4
+    n_last_blocks: 4
+
+  dino_codec:
+    'N': 192
+    M: 48
+    groups: 16
+    dim: 384
+    ctx_dim: 256

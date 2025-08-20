@@ -1,0 +1,66 @@
+multi_run:
+  q0300:
+    ckpt_path: /home/faymek/MPCompress/exp/MPC12-EmD48G3/Q3.0/runner.best.pth.tar
+  # q0600:
+  #   ckpt_path: /home/faymek/MPCompress/exp/MPC12-EmD48G3/Q6.0/runner.best.pth.tar
+  # q1200:
+  #   ckpt_path: /home/faymek/MPCompress/exp/MPC12-EmD48G3/Q12.0/runner.best.pth.tar
+  # q2400:
+  #   ckpt_path: /home/faymek/MPCompress/exp/MPC12-EmD48G3/Q24.0/runner.best.pth.tar
+  # q4800:
+  #   ckpt_path: /home/faymek/MPCompress/exp/MPC12-EmD48G3/Q48.0/runner.best.pth.tar
+
+load:
+  path: /home/faymek/MPCompress/exp/MPC12-EmD48G3/Q3.0/runner.best.pth.tar
+  strict: true
+  rules: # type, pattern, replacement
+    - ["startswith", "vqgan.", "vqgan.vqgan."]
+    - ["startswith", "mp12_enc.", "dino_codec.cond_enc."]
+    - ["startswith", "dec1.", "cond_dec_for_vqgan."]
+    - ["startswith", "dec2.", "dino_codec.cond_dec."]
+    - ["startswith", "f_a.", "dino_codec.f_a."]
+    - ["startswith", "f_s.", "dino_codec.f_s."]
+    - ["startswith", "vqgan_down.", "dino_codec.f_ctx_down."]
+    - ["startswith", "latent_codec.hyper.", "dino_codec.hyper_lc."]
+    - ["startswith", "latent_codec.y.", "dino_codec.y_lc."]
+    - ["startswith", "post_reg_tokens", "dino_codec.post_reg_tokens"]
+    - ["startswith", "pre_vit_blocks.", "dino_codec.pre_vit_blocks."]
+    - ["startswith", "post_vit_blocks.", "dino_codec.post_vit_blocks."]
+
+model: 
+  type: MPC_I12
+  vqgan_backbone:
+    ckpt_path: /home/faymek/Models/kmeans_tune/16384_kmeans_1024_epoch/epoch1/checkpoints/last.ckpt
+    n_embed: 1024
+    embed_dim: 256
+    ddconfig:
+      double_z: false
+      z_channels: 256
+      resolution: 256
+      in_channels: 3
+      out_ch: 3
+      ch: 128
+      ch_mult: [1, 1, 2, 2, 4]
+      num_res_blocks: 2
+      attn_resolutions:
+      - 16
+      dropout: 0.0
+
+  vqgan_codec:
+    type: UniformTokenCodec
+    alphabet_size: 1024
+
+  dino_backbone:
+    model_size: small
+    img_size: 256
+    patch_size: 16
+    dynamic_size: true
+    slot: -4
+    n_last_blocks: 4
+
+  dino_codec:
+    'N': 192
+    M: 48
+    groups: 16
+    dim: 384
+    ctx_dim: 256
