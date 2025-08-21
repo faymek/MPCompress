@@ -1,7 +1,6 @@
 # Introduction
 
-This project is the official implementation of the Multi-Purpose Compression test platform.
-
+This project is the official implementation of the Multi-Purpose Compression (MPC) test platform. It provides a public testing environment for evaluating feature coding methods.
 
 # Environments Set Up
 
@@ -21,47 +20,32 @@ cd MPCompress
 poetry install
 echo "Virtual environment created in $(poetry env list --full-path)"
 
-# Link to local CompressAI source code.
+# Link to local MPCompress source code.
 poetry run pip install --editable .
 
 ```
 
-## Install MMCV
-
-Install `mmcv==2.1.0` and `mmsegmentation==1.2.1`. mmcv needs to be built from source. Note that mmcv 2.0 has many apis that differs from mmcv 1.0. For detailed instructions, see: https://mmcv.readthedocs.io/en/latest/get_started/installation.html
-
-Build mmcv from source.
-```sh
-git clone https://github.com/open-mmlab/mmcv.git
-cd mmcv
-git checkout v2.1.0
-
-pip install -r requirements/optional.txt
-nvcc --version
-gcc --version
-
-# missing steps in mmcv docs
-python setup.py build_ext
-python setup.py develop
-
-# Validate the installation
-python .dev_scripts/check_installation.py
-```
-
-Install mmsegmentation using mim
-```sh
-pip install -U openmim
-mim install "mmsegmentation==1.2.1"
-```
-
-
 # Dataset and Model Preparation
 
-We provide packaged datasets and pretrained model checkpoints at the following link:  
-[Insert download link here]
+We provide publicly available datasets and pre-trained backbone/head checkpoints via the following link:
 
-Alternatively, you may download them manually by following the instructions below:  
-[Add download instructions if applicable]
+- Link: https://pan.sjtu.edu.cn/web/share/ca76721e0799fc8411ff44c1c4cbf5f3  
+- Access code: mkhr
+
+Please download the resources and extract them into the current directory. The resulting directory structure should look like this:
+
+```
+data
+├── dataset
+│   ├── COCO_val2017_sel100
+│   ├── ImageNet_val_sel100
+│   ├── ImageNet_val_sel2k
+│   ├── VOC2012
+├── models
+│   ├── backbone
+│   ├── dinov2_cls_head
+│   └── dinov2_seg_head
+```
 
 
 # Testing Instructions
@@ -74,28 +58,22 @@ poetry shell
 
 ## Testing FCM-LM
 
-Implementation for the paper:  
-"Feature Coding in the Era of Large Models: Dataset, Test Conditions, and Benchmark"
+> "Feature Coding in the Era of Large Models: Dataset, Test Conditions, and Benchmark"
 
-*Note: This test script is adapted from [FCM-LM](https://github.com/chansongoal/FCM-LM)*
+Large models are often partitioned and deployed across multiple devices. In such distributed setups, intermediate features must be encoded and transmitted between nodes. FCM-LM is a feature coding framework designed to minimize the required bitrate under a specified task accuracy constraint, or conversely, to maximize task accuracy under a given bitrate limit.
 
-### Test Options:
+For implementation details and usage examples, please refer to the directory `examples/fcm-lm/` and its dedicated [README](examples/fcm-lm/README.md).
 
-1. **DINOv2 Classification Model with VTM Compression**
-```sh
-CUDA_VISIBLE_DEVICES=0 python examples/fcm-lm/run_dinov2-cls_vtm_cls.py
-```
+This test script is adapted from the original [FCM-LM repository](https://github.com/chansongoal/LaMoFC). Note that results may vary slightly depending on the versions of Python libraries used.
 
-2. **Hyperprior Model with Hyperprior Compression**
-```sh
-CUDA_VISIBLE_DEVICES=0 python mpcompress/eval/run_dinov2_cls_hyperprior.py
-```
+## Testing MPC
 
+The Multi-Purpose Compression (MPC) framework is a coding architecture designed to prioritize machine vision while retaining compatibility with human visual perception. It extracts general-purpose visual features at the encoder and enables low-complexity decoding of task-relevant information at the decoder. The framework adopts a multi-branch structure to support on-demand bitstream extraction, making it adaptable to a variety of downstream tasks.
 
-
+For implementation details and usage examples, please refer to the directory `examples/mpc/` and its dedicated [README](examples/mpc/README.md).
 
 # Acknowledgement
 
-Special thanks to Donghui Feng, Fengxi Zhang, Bo Gao and Zekai Liu, for their valuable contributions in building this test platform.
+Special thanks to Donghui Feng, Bo Gao, Qingyue Ling, Fengxi Zhang and Zekai Liu, for their valuable contributions in building this test platform.
 
 Special thanks to Yifan Ma, Qiaoxi Chen, and Yenan Xu, for their valuable contributions in building FCM-LM.
