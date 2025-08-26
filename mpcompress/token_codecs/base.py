@@ -10,7 +10,7 @@ class UniformTokenCodec(CompressionModel):
 
     def forward(self, tokens):
         return {
-            "likelihoods": {"y": self._uniform_likelihood(tokens)},
+            "likelihoods": {"t": self._uniform_likelihood(tokens)},
             "tokens": tokens,
         }
 
@@ -23,16 +23,19 @@ class UniformTokenCodec(CompressionModel):
         alphabet_size = self.alphabet_size
         string = encode_uniform_to_bits(tokens.flatten(), alphabet_size)
         return {
-            "strings": [string],
-            "shape": tuple(tokens.shape),
+            "strings": {"t": [[string]]},  # for consistent API
+            "shape": {"t": tuple(tokens.shape)},
         }
 
     def decompress(self, strings, shape, **kwargs):
+        # for consistent API
+        _strings = strings["t"][0][0]
+        _shape = shape["t"]
         symbols_len = 1
-        for dim in shape:  # no batch dim
+        for dim in _shape:  # no batch dim
             symbols_len *= dim
         alphabet_size = self.alphabet_size
-        tokens = decode_uniform_from_bits(strings[0], symbols_len, alphabet_size)
-        tokens = tokens.reshape(shape).long().cuda()
+        tokens = decode_uniform_from_bits(_strings, symbols_len, alphabet_size)
+        tokens = tokens.reshape(_shape).long().cuda()
         return {"tokens": tokens}
 

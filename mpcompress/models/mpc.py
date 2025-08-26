@@ -88,7 +88,7 @@ class MPC_I2(CompressionModel):
             if return_seg:
                 results["seg"] = self.dino.decode_seg(h_dino_hat, token_res)
 
-            results["likelihoods"] = dino_out["likelihoods"]
+            results["ibranch2"]= {"likelihoods": dino_out["likelihoods"]}
             return results
 
     def compress(self, x):
@@ -215,11 +215,13 @@ class MPC_I12(CompressionModel):
             if return_seg:
                 results["seg"] = self.dino.decode_seg(h_dino_hat, token_res)
 
-            results["likelihoods"] = {
-                "y": dino_out["likelihoods"]["y"],
-                "z": dino_out["likelihoods"]["z"],
-                "z_q": vqgan_out["likelihoods"]["y"],
-            }
+            # results["likelihoods"] = {
+            #     "y": dino_out["likelihoods"]["y"],
+            #     "z": dino_out["likelihoods"]["z"],
+            #     "z_q": vqgan_out["likelihoods"]["y"],
+            # }
+            results["ibranch1"]= {"likelihoods": vqgan_out["likelihoods"]}
+            results["ibranch2"]= {"likelihoods": dino_out["likelihoods"]}
             return results
 
     def compress(self, x):
@@ -271,3 +273,4 @@ class MPC_I12(CompressionModel):
             results["seg"] = self.dino.decode_seg(dino_out["h_hat"], token_res)
 
         return results
+

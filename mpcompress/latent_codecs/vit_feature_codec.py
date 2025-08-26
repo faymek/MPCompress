@@ -135,23 +135,17 @@ class VitUnionLatentCodec(CompressionModel):
             for k in range(len(self.groups))
         }
 
-        # [He2022] uses a "hyperprior" architecture, which reconstructs y using z.
-        self.latent_codec = HyperpriorLatentCodec(
-            latent_codec={
-                # Channel groups with space-channel context model (SCCTX):
-                "y": ChannelGroupsLatentCodec(
-                    groups=self.groups,
-                    channel_context=channel_context,
-                    latent_codec=scctx_latent_codec,
-                ),
-                # Side information branch containing z:
-                "hyper": HyperLatentCodec(
-                    entropy_bottleneck=EntropyBottleneck(z_dim),
-                    h_a=h_a,
-                    h_s=h_s,
-                    quantizer="ste",
-                ),
-            },
+        # Channel groups with space-channel context model (SCCTX):
+        self.y_lc = ChannelGroupsLatentCodec(
+            groups=self.groups,
+            channel_context=channel_context,
+            latent_codec=scctx_latent_codec,
+        )
+        self.hyper_lc = HyperLatentCodec(
+            entropy_bottleneck=EntropyBottleneck(z_dim),
+            h_a=h_a,
+            h_s=h_s,
+            quantizer="ste",
         )
 
     def forward(self, h, token_res):
@@ -161,7 +155,8 @@ class VitUnionLatentCodec(CompressionModel):
         h = self.pre_vit_blocks(h)[:, 1:].contiguous()
         h = rearrange(h, "B (H W) C -> B C H W", H=token_res[0], W=token_res[1])
         y = self.f_a(h)
-        y_out = self.latent_codec(y)
+        hyper_out = self.hyper_lc(y)
+        y_out = self.y_lc(y, hyper_out["params"])
         y_hat = y_out["y_hat"]
 
         _h_hat = self.f_s(y_hat)
@@ -171,22 +166,29 @@ class VitUnionLatentCodec(CompressionModel):
 
         return {
             "h_hat": h_hat,
-            "likelihoods": y_out["likelihoods"],
+            "likelihoods": {
+                "y": y_out["likelihoods"]["y"],
+                "z": hyper_out["likelihoods"]["z"],
+            },
         }
 
     def compress(self, h, token_res):
         h = self.pre_vit_blocks(h)[:, 1:].contiguous()
         h = rearrange(h, "B (H W) C -> B C H W", H=token_res[0], W=token_res[1])
         y = self.f_a(h)
-        y_out = self.latent_codec.compress(y)
+        hyper_out = self.hyper_lc.compress(y)
+        y_out = self.y_lc.compress(y, hyper_out["params"])
 
         return {
-            "strings": y_out["strings"],
-            "shape": y_out["shape"],
+            "strings": {"y": y_out["strings"], "z": hyper_out["strings"]},
+            "shape": {"y": y_out["shape"], "z": hyper_out["shape"]},
         }
 
     def decompress(self, strings, shape, **kwargs):
-        y_out = self.latent_codec.decompress(strings, shape)
+        y_strings_ = strings["y"]
+        z_strings_ = strings["z"]
+        hyper_out = self.hyper_lc.decompress(z_strings_, shape["z"])
+        y_out = self.y_lc.decompress(y_strings_, shape["y"], hyper_out["params"])
         h_hat = self.f_s(y_out["y_hat"])
         _h_hat = rearrange(h_hat, "B C H W -> B (H W) C")
         _h_hat = torch.cat([self.post_reg_tokens.expand(1, -1, -1), _h_hat], dim=1)
@@ -399,19 +401,19 @@ class VitUnionLatentCodecWithCtx(CompressionModel):
 
         hyper_out = self.hyper_lc.compress(y, ctx_down)
         y_out = self.y_lc.compress(y, hyper_out["params"])
-        [z_strings] = hyper_out["strings"]
 
         return {
-            "strings": [*y_out["strings"], z_strings],
-            "shape": {"y": y_out["shape"], "hyper": hyper_out["shape"]},
+            "strings": {"y": y_out["strings"], "z": hyper_out["strings"]},
+            "shape": {"y": y_out["shape"], "z": hyper_out["shape"]},
             # "y_hat": y_out["y_hat"],
         }
 
     def decompress(self, strings, shape, ctx, **kwargs):
-        *y_strings_, z_strings = strings
-        assert all(len(y_strings) == len(z_strings) for y_strings in y_strings_)
+        y_strings_ = strings["y"]
+        z_strings_ = strings["z"]
+        # assert all(len(y_strings) == len(z_strings) for y_strings in y_strings_)
         ctx_down = self.f_ctx_down(ctx)
-        hyper_out = self.hyper_lc.decompress([z_strings], shape["hyper"], ctx_down)
+        hyper_out = self.hyper_lc.decompress(z_strings_, shape["z"], ctx_down)
         y_out = self.y_lc.decompress(y_strings_, shape["y"], hyper_out["params"])
         y_hat = y_out["y_hat"]
 
