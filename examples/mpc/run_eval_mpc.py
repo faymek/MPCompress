@@ -16,6 +16,7 @@ from torchvision.transforms import ToPILImage, ToTensor
 import importlib
 import shutil
 import tqdm
+import math
 
 from mpcompress.datasets import *
 from mpcompress.heads import *
@@ -54,39 +55,39 @@ def instantiate_class(config, **kwargs):
         raise KeyError("Expected key `type` to instantiate.")
 
 
-def calc_real_bpp_items(out_enc, x):
-    """计算实际比特率"""
-    num_pixels = x.size(0) * x.size(2) * x.size(3)
-    dino_byte_len = [len(s[0]) for s in out_enc["ibranch2"]["strings"]]
-    byte_len_list = {
-        "y": sum(dino_byte_len[:-1]),
-        "z": dino_byte_len[-1],
-    }
-    if "ibranch1" in out_enc:
-        byte_len_list["vq"] = len(out_enc["ibranch1"]["strings"][0])
-    bpp_items = {
-        f"bpp_{name}": (length * 8.0 / num_pixels)
-        for name, length in byte_len_list.items()
-    }
-    return bpp_items
+def calc_bits_items(out):
+    if "strings" in out:  # real compression
+        bits_items = {
+            f"{name}": sum(len(s[0]) for s in sub_strings) * 8.0
+            for name, sub_strings in out["strings"].items()
+        }
+        return bits_items
+    elif "likelihoods" in out:
+        bits_items = {
+            f"{name}": (torch.log(likelihoods).sum() / (-math.log(2))).item()
+            for name, likelihoods in out["likelihoods"].items()
+        }
+        return bits_items
+    else:
+        raise KeyError("Expected key `strings` or `likelihoods` in out_enc.")
 
 
-def calc_esti_bpp_items(out_net, x):
-    """计算估计比特率"""
-    import math
-
-    num_pixels = x.size(0) * x.size(2) * x.size(3)
-    bpp_items = {
-        f"bpp_{name}": (
-            torch.log(likelihoods).sum() / (-math.log(2) * num_pixels)
-        ).item()
-        for name, likelihoods in out_net["likelihoods"].items()
-    }
-    return bpp_items
+def mpc_calc_bits_items(out):
+    mpc_bits_items = {}
+    if "ibranch1" in out or "ibranch2" in out:
+        if "ibranch1" in out:
+            for name, value in calc_bits_items(out["ibranch1"]).items():
+                mpc_bits_items[f"i1_{name}"] = value
+        if "ibranch2" in out:
+            for name, value in calc_bits_items(out["ibranch2"]).items():
+                mpc_bits_items[f"i2_{name}"] = value
+    else:
+        mpc_bits_items = calc_bits_items(out)
+    return mpc_bits_items
 
 
 @torch.inference_mode()
-def inference_file(model, x, real=False, recon=2, return_cls=False, return_seg=False):
+def inference_x(model, x, real=False, recon=2, return_cls=False, return_seg=False):
     """推理单个文件"""
     if real:  # 实际压缩
         start = time.time()
@@ -101,12 +102,10 @@ def inference_file(model, x, real=False, recon=2, return_cls=False, return_seg=F
             return_seg=return_seg,
         )
         dec_time = time.time() - start
-        bpp_items = calc_real_bpp_items(out_enc, x)
-        bpp = sum(bpp_items.values())
-        org_result = {
+        bits_items = mpc_calc_bits_items(out_enc)
+        time_items = {
             "enc_time": enc_time,
             "dec_time": dec_time,
-            "bpp": bpp,
         }
     else:  # 估计
         start = time.time()
@@ -118,16 +117,13 @@ def inference_file(model, x, real=False, recon=2, return_cls=False, return_seg=F
             return_seg=return_seg,
         )
         elapsed_time = time.time() - start
-        bpp_items = calc_esti_bpp_items(out_net, x)
-        bpp = sum(bpp_items.values())
-        org_result = {
+        bits_items = mpc_calc_bits_items(out_net)
+        time_items = {
             "enc_time": elapsed_time / 2.0,  # 粗略估计
             "dec_time": elapsed_time / 2.0,
-            "bpp": bpp,
         }
 
-    org_result.update(bpp_items)
-    return org_result, out_net
+    return time_items, bits_items, out_net
 
 
 @torch.inference_mode()
@@ -212,7 +208,7 @@ def eval_model(cfg):
         x = x.unsqueeze(0) if x.dim() == 3 else x
         x_padded, padding = center_pad(x, 128)
 
-        out_result, out_net = inference_file(
+        time_items, bits_items, out_net = inference_x(
             model,
             x_padded,
             real=cfg.args.real,
@@ -220,6 +216,14 @@ def eval_model(cfg):
             return_cls=cls_head is not None,
             return_seg=seg_head is not None,
         )
+        bpp_items = {f"bpp_{k}": v / x.size(0) / x.size(2) / x.size(3) for k, v in bits_items.items()}
+        bpp = sum(bpp_items.values())
+
+        out_result = {
+            **time_items,
+            "bpp": bpp,
+            **bpp_items,
+        }
 
         # 计算图像质量指标
         iqa_result = {}
