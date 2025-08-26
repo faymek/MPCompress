@@ -54,7 +54,7 @@ class MPC_I2(CompressionModel):
 
     def forward(self, x):  # for lic training
         with torch.inference_mode():
-            h_dino = self.dino.encode(x, slot=self.slot)
+            h_dino = self.dino.encode(x)
             token_res = (
                 x.shape[2] // self.dino.patch_size,
                 x.shape[3] // self.dino.patch_size,
@@ -63,7 +63,7 @@ class MPC_I2(CompressionModel):
 
         h_dino = h_dino.clone()
         dino_out = self.dino_codec(h_dino, token_res)
-        h_dino_hat = dino_out["h_dino_hat"]
+        h_dino_hat = dino_out["h_hat"]
         o_dino_hat = self.dino.decode_whole(h_dino_hat)[0]
 
         return {
@@ -81,7 +81,7 @@ class MPC_I2(CompressionModel):
                 x.shape[3] // self.dino.patch_size,
             )
             dino_out = self.dino_codec(h_dino, token_res)
-            h_dino_hat = dino_out["h_dino_hat"]
+            h_dino_hat = dino_out["h_hat"]
 
             if return_cls:
                 results["cls"] = self.dino.decode_cls(h_dino_hat)
@@ -133,7 +133,7 @@ class MPC_I12(CompressionModel):
         self.dino_codec = VitUnionLatentCodecWithCtx(**dino_codec)
 
         # additional branch for enhance branch1
-        D_DINO = dino_codec["dim"]
+        D_DINO = dino_codec["h_dim"]
         D_VQGAN = dino_codec["ctx_dim"]
         self.cond_dec_for_vqgan = nn.Sequential(
             conv(D_DINO + D_VQGAN, D_VQGAN, kernel_size=3, stride=1),

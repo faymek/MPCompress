@@ -29,65 +29,65 @@ from mpcompress.layers.vit import Block
 class VitUnionLatentCodec(CompressionModel):
     def __init__(
         self,
-        N=192,
-        M=256,
-        dim=384,
-        groups=None,
+        h_dim=384,
+        y_dim=256,
+        z_dim=192,
+        groups=16,
         **kwargs,
     ):
         super().__init__()
-        if groups is None:
-            groups = [16, 16, 32, 64, M - 128]
+        if isinstance(groups, list):
+            self.groups = groups
         elif isinstance(groups, int):
-            groups = [groups] * (M // groups)
-        self.groups = groups
+            self.groups = [groups] * (y_dim // groups)
+        assert sum(self.groups) == y_dim, "groups must sum to y_dim"
 
-        self.N = N
-        self.M = M
+        self.y_dim = y_dim
+        self.z_dim = z_dim
 
-        self.post_reg_tokens = nn.Parameter(torch.zeros(1, dim), requires_grad=True)
+        self.post_reg_tokens = nn.Parameter(torch.zeros(1, h_dim), requires_grad=True)
         self.pre_vit_blocks = nn.Sequential(
-            *[Block(dim=dim, num_heads=dim // 64, mlp_ratio=4) for _ in range(2)]
+            *[Block(dim=h_dim, num_heads=h_dim // 64, mlp_ratio=4) for _ in range(2)]
         )
         self.post_vit_blocks = nn.Sequential(
-            *[Block(dim=dim, num_heads=dim // 64, mlp_ratio=4) for _ in range(2)]
+            *[Block(dim=h_dim, num_heads=h_dim // 64, mlp_ratio=4) for _ in range(2)]
         )
 
         self.f_a = nn.Sequential(
-            conv(dim, M, kernel_size=3, stride=1),
+            conv(h_dim, y_dim, kernel_size=3, stride=1),
             nn.ReLU(inplace=True),
-            conv(M, M, kernel_size=5, stride=2),
+            conv(y_dim, y_dim, kernel_size=5, stride=2),
         )
         self.f_s = nn.Sequential(
-            deconv(M, M, kernel_size=5, stride=2),
+            deconv(y_dim, y_dim, kernel_size=5, stride=2),
             nn.ReLU(inplace=True),
-            deconv(M, dim, kernel_size=3, stride=1),
+            deconv(y_dim, h_dim, kernel_size=3, stride=1),
         )
 
         h_a = nn.Sequential(
-            conv(M, N, kernel_size=3, stride=1),
+            conv(y_dim, z_dim, kernel_size=3, stride=1),
             nn.ReLU(inplace=True),
-            conv(N, N, kernel_size=5, stride=2),
+            conv(z_dim, z_dim, kernel_size=5, stride=2),
             nn.ReLU(inplace=True),
-            conv(N, N, kernel_size=5, stride=2),
+            conv(z_dim, z_dim, kernel_size=5, stride=2),
         )
 
         h_s = nn.Sequential(
-            deconv(N, N, kernel_size=5, stride=2),
+            deconv(z_dim, z_dim, kernel_size=5, stride=2),
             nn.ReLU(inplace=True),
-            deconv(N, N * 3 // 2, kernel_size=5, stride=2),
+            deconv(z_dim, z_dim * 3 // 2, kernel_size=5, stride=2),
             nn.ReLU(inplace=True),
-            deconv(N * 3 // 2, N * 2, kernel_size=3, stride=1),
+            deconv(z_dim * 3 // 2, z_dim * 2, kernel_size=3, stride=1),
         )
 
         # In [He2022], this is labeled "g_ch^(k)".
         channel_context = {
             f"y{k}": nn.Sequential(
-                conv(sum(self.groups[:k]), 192, kernel_size=5, stride=1),
+                conv(sum(self.groups[:k]), z_dim, kernel_size=5, stride=1),
                 nn.ReLU(inplace=True),
-                conv(192, 192, kernel_size=5, stride=1),
+                conv(z_dim, z_dim, kernel_size=5, stride=1),
                 nn.ReLU(inplace=True),
-                conv(192, self.groups[k] * 2, kernel_size=5, stride=1),
+                conv(z_dim, self.groups[k] * 2, kernel_size=5, stride=1),
             )
             for k in range(1, len(self.groups))
         }
@@ -108,9 +108,9 @@ class VitUnionLatentCodec(CompressionModel):
         param_aggregation = [
             sequential_channel_ramp(
                 # Input: spatial context, channel context, and hyper params.
-                self.groups[k] * 2 + (k > 0) * self.groups[k] * 2 + N * 2,
+                self.groups[k] * 2 + (k > 0) * self.groups[k] * 2 + z_dim * 2,
                 self.groups[k] * 2,
-                min_ch=N * 2,
+                min_ch=z_dim * 2,
                 num_layers=3,
                 interp="linear",
                 make_layer=nn.Conv2d,
@@ -146,7 +146,7 @@ class VitUnionLatentCodec(CompressionModel):
                 ),
                 # Side information branch containing z:
                 "hyper": HyperLatentCodec(
-                    entropy_bottleneck=EntropyBottleneck(N),
+                    entropy_bottleneck=EntropyBottleneck(z_dim),
                     h_a=h_a,
                     h_s=h_s,
                     quantizer="ste",
@@ -164,13 +164,13 @@ class VitUnionLatentCodec(CompressionModel):
         y_out = self.latent_codec(y)
         y_hat = y_out["y_hat"]
 
-        h_hat = self.f_s(y_hat)
-        _h_hat = rearrange(h_hat, "B C H W -> B (H W) C")
+        _h_hat = self.f_s(y_hat)
+        _h_hat = rearrange(_h_hat, "B C H W -> B (H W) C")
         _h_hat = torch.cat([self.post_reg_tokens.expand(B, -1, -1), _h_hat], dim=1)
-        h_dino_hat = self.post_vit_blocks(_h_hat)
+        h_hat = self.post_vit_blocks(_h_hat)
 
         return {
-            "h_dino_hat": h_dino_hat,
+            "h_hat": h_hat,
             "likelihoods": y_out["likelihoods"],
         }
 
@@ -235,35 +235,35 @@ class HyperDecoderWithCtx(nn.Module):
 class VitUnionLatentCodecWithCtx(CompressionModel):
     def __init__(
         self,
-        N=192,
-        M=256,
-        dim=384,
+        h_dim=384,
+        y_dim=256,
+        z_dim=192,
         ctx_dim=256,
-        groups=None,
+        groups=16,
         **kwargs,
     ):
         super().__init__()
-        if groups is None:
-            groups = [16, 16, 32, 64, M - 128]
+        if isinstance(groups, list):
+            self.groups = groups
         elif isinstance(groups, int):
-            groups = [groups] * (M // groups)
-        self.groups = groups
+            self.groups = [groups] * (y_dim // groups)
+        assert sum(self.groups) == y_dim, "groups must sum to y_dim"
 
-        self.N = N
-        self.M = M
+        self.y_dim = y_dim
+        self.z_dim = z_dim
 
-        self.post_reg_tokens = nn.Parameter(torch.zeros(1, dim), requires_grad=True)
+        self.post_reg_tokens = nn.Parameter(torch.zeros(1, h_dim), requires_grad=True)
         self.pre_vit_blocks = nn.Sequential(
-            *[Block(dim=dim, num_heads=dim // 64, mlp_ratio=4) for _ in range(2)]
+            *[Block(dim=h_dim, num_heads=h_dim // 64, mlp_ratio=4) for _ in range(2)]
         )
         self.post_vit_blocks = nn.Sequential(
-            *[Block(dim=dim, num_heads=dim // 64, mlp_ratio=4) for _ in range(2)]
+            *[Block(dim=h_dim, num_heads=h_dim // 64, mlp_ratio=4) for _ in range(2)]
         )
 
         self.cond_enc = nn.Sequential(
-            conv(dim + ctx_dim, dim, kernel_size=3, stride=1),
+            conv(h_dim + ctx_dim, h_dim, kernel_size=3, stride=1),
             nn.ReLU(inplace=True),
-            conv(dim, dim, kernel_size=3, stride=1),
+            conv(h_dim, h_dim, kernel_size=3, stride=1),
         )
         # self.cond_dec1 = nn.Sequential(
         #     deconv(dim, dim, kernel_size=3, stride=1),
@@ -272,45 +272,30 @@ class VitUnionLatentCodecWithCtx(CompressionModel):
         # )
 
         self.cond_dec = nn.Sequential(
-            conv(dim + ctx_dim, dim, kernel_size=3, stride=1),
+            conv(h_dim + ctx_dim, h_dim, kernel_size=3, stride=1),
             nn.ReLU(inplace=True),
-            conv(dim, dim, kernel_size=3, stride=1),
+            conv(h_dim, h_dim, kernel_size=3, stride=1),
         )
         self.f_ctx_down = conv(ctx_dim, ctx_dim, kernel_size=3, stride=2)
 
         self.f_a = nn.Sequential(
-            conv(dim, M, kernel_size=3, stride=1),
+            conv(h_dim, y_dim, kernel_size=3, stride=1),
             nn.ReLU(inplace=True),
-            conv(M, M, kernel_size=5, stride=2),
+            conv(y_dim, y_dim, kernel_size=5, stride=2),
         )
         self.f_s = nn.Sequential(
-            deconv(M, M, kernel_size=5, stride=2),
+            deconv(y_dim, y_dim, kernel_size=5, stride=2),
             nn.ReLU(inplace=True),
-            deconv(M, dim, kernel_size=3, stride=1),
+            deconv(y_dim, h_dim, kernel_size=3, stride=1),
         )
 
-        # h_a = nn.Sequential(
-        #     conv(M, N, kernel_size=3, stride=1),
-        #     nn.ReLU(inplace=True),
-        #     conv(N, N, kernel_size=5, stride=2),
-        #     nn.ReLU(inplace=True),
-        #     conv(N, N, kernel_size=5, stride=2),
-        # )
-
-        # h_s = nn.Sequential(
-        #     deconv(N, N, kernel_size=5, stride=2),
-        #     nn.ReLU(inplace=True),
-        #     deconv(N, N * 3 // 2, kernel_size=5, stride=2),
-        #     nn.ReLU(inplace=True),
-        #     deconv(N * 3 // 2, N * 2, kernel_size=3, stride=1),
-        # )
-        h_a = HyperEncoderWithCtx(N, M, ctx_dim)
-        h_s = HyperDecoderWithCtx(N, M, ctx_dim)
+        h_a = HyperEncoderWithCtx(z_dim, y_dim, ctx_dim)
+        h_s = HyperDecoderWithCtx(z_dim, y_dim, ctx_dim)
 
         # In [He2022], this is labeled "g_ch^(k)".
         channel_context = {
             f"y{k}": nn.Sequential(
-                conv(sum(self.groups[:k]), 192, kernel_size=5, stride=1),
+                conv(sum(self.groups[:k]), z_dim, kernel_size=5, stride=1),
                 nn.ReLU(inplace=True),
                 conv(192, 192, kernel_size=5, stride=1),
                 nn.ReLU(inplace=True),
@@ -335,9 +320,9 @@ class VitUnionLatentCodecWithCtx(CompressionModel):
         param_aggregation = [
             sequential_channel_ramp(
                 # Input: spatial context, channel context, and hyper params.
-                self.groups[k] * 2 + (k > 0) * self.groups[k] * 2 + N * 2,
+                self.groups[k] * 2 + (k > 0) * self.groups[k] * 2 + z_dim * 2,
                 self.groups[k] * 2,
-                min_ch=N * 2,
+                min_ch=z_dim * 2,
                 num_layers=3,
                 interp="linear",
                 make_layer=nn.Conv2d,
@@ -369,7 +354,7 @@ class VitUnionLatentCodecWithCtx(CompressionModel):
             latent_codec=scctx_latent_codec,
         )
         self.hyper_lc = HyperLatentCodecWithCtx(
-            entropy_bottleneck=EntropyBottleneck(N),
+            entropy_bottleneck=EntropyBottleneck(z_dim),
             h_a=h_a,
             h_s=h_s,
             quantizer="ste",

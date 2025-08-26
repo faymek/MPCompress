@@ -33,8 +33,7 @@ model:
     n_last_blocks: 4
 
   dino_codec:
-    'N': 192
-    M: 48
+    h_dim: 384
+    y_dim: 48
+    z_dim: 192
     groups: 16
-    dim: 384
-    ctx_dim: 256
