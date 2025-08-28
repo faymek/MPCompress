@@ -14,6 +14,7 @@ load:
   path: /home/faymek/MPCompress/exp/MPC2-new/Q3.0/runner.best.pth.tar
   strict: true
   rules: # type, pattern, replacement
+    - ["startswith", "dino.feature_model", "dino.model"]
     - ["startswith", "post_reg_tokens", "dino_codec.post_reg_tokens"]
     - ["startswith", "pre_vit_blocks.", "dino_codec.pre_vit_blocks."]
     - ["startswith", "post_vit_blocks.", "dino_codec.post_vit_blocks."]

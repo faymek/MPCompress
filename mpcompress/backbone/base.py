@@ -7,7 +7,39 @@ import torchvision.transforms as transforms
 from mpcompress.backbone.vqgan.vq_model import VQModel  # type: ignore
 
 
+class VqganBackbone(nn.Module):
+    def __init__(self, vqgan_config, **kwargs):
+        super().__init__()
+        self.vqgan = VQModel(**vqgan_config)
+        self.codebook_size = self.vqgan.quantize.embedding.weight.size()[0]
+
+    def encode(self, x):
+        # x: (B, 3, H, W), (0, 1) range
+        # note that: original VQGAN accept (-1,1) range
+        # note that: z_q' = z + (z_q - z).detach()
+        # this incurs a small MSE(z_q', z_q) = 1e-18
+        # so we use z_q as the context
+        z = self.vqgan.quant_conv(self.vqgan.encoder(2 * x - 1))
+        z_q_prime, _, (_, _, idxs_1d) = self.vqgan.quantize(z)
+        z_shape = z_q_prime.shape[-2:]
+        tokens = idxs_1d.reshape(z_shape[0], z_shape[1])
+        z_q = self.vqgan.quantize.embedding(idxs_1d)
+        z_q = rearrange(z_q, "(H W) C -> 1 C H W", H=z_shape[0], W=z_shape[1])
+        return {"z": z, "z_q": z_q, "tokens": tokens, "shape": z_shape}
+
+    def tokens_to_features(self, tokens):
+        z_q = self.vqgan.quantize.embedding(tokens.flatten())
+        z_q = rearrange(z_q, "(H W) C -> 1 C H W", H=tokens.shape[0], W=tokens.shape[1])
+        return z_q
+
+    def decode(self, z_q):
+        x_hat = self.vqgan.decode(z_q)
+        x_hat = (x_hat + 1) / 2
+        return x_hat
+
+
 class Dinov2TimmBackbone(nn.Module):
+    # dinov2 of timm implementation, support varing patch size and dynamic image size
     def __init__(
         self,
         model_size="small",
@@ -16,11 +48,10 @@ class Dinov2TimmBackbone(nn.Module):
         dynamic_size=False,
         slot=-4,  # cut position, -4 means the last 4th block
         n_last_blocks=4,  # number of last blocks to take
-        autocast_ctx=torch.float,
+        ckpt_path=None,
     ):
         super().__init__()
         self.n_last_blocks = n_last_blocks
-        self.autocast_ctx = autocast_ctx
         assert model_size in ["small", "base", "large", "giant"]
         self.model_size = model_size
         self.img_size = img_size
@@ -28,7 +59,8 @@ class Dinov2TimmBackbone(nn.Module):
         self.dynamic_size = dynamic_size
         self.slot = slot
         self.n_last_blocks = n_last_blocks
-        self.feature_model = self.load_timm_model()
+        self.ckpt_path = ckpt_path
+        self.model = self.load_timm_model()
         self.input_transform = transforms.Compose(
             [
                 transforms.Normalize(
@@ -52,29 +84,19 @@ class Dinov2TimmBackbone(nn.Module):
     def forward(self, x, task="whole"):
         assert task in ["whole", "cls", "seg"]
         with torch.inference_mode():
-            # with self.autocast_ctx():
-            # features = self.feature_model.get_intermediate_layers(
-            #     x, n, reshape=reshape, return_prefix_tokens=return_class_token, norm=norm)
-            # features = [(f, c[:, 0, :]) for (f, c) in features]
             h = self.encode(x, self.slot)
-            # features += torch.randn_like(features) * 1
             token_res = (x.size(2) // self.patch_size, x.size(3) // self.patch_size)
             h = self.decode(h, token_res=token_res, task=task)
             return h
 
-    def encode(
-        self,
-        x,
-        slot=-4,
-    ):
-        # for compressed model, we only need the output of the -4 block
-        dino = self.feature_model
+    def encode(self, x):
+        dino = self.model
         x = self.input_transform(x)
         x = dino.patch_embed(x)
         x = dino._pos_embed(x)
         x = dino.patch_drop(x)
         x = dino.norm_pre(x)
-        for i, blk in enumerate(dino.blocks[:slot]):
+        for i, blk in enumerate(dino.blocks[: self.slot]):
             x = blk(x)
         return x
 
@@ -99,7 +121,7 @@ class Dinov2TimmBackbone(nn.Module):
         assert return_format in allow_formats, (
             f"return_format must be one of {allow_formats}"
         )
-        dino = self.feature_model
+        dino = self.model
 
         # If n is an int, take the n last blocks. If it's a list, take them
         multi_outputs = []
