@@ -211,3 +211,48 @@ class Dinov2SegmentationHead(nn.Module):
                 align_corners=self.align_corners,
             )
         return seg_logits
+
+    def slide_predict(self, feature_list, current_size, slide_window, slide_stride, target_size=None):
+        # feature_list: [[(B,C,H,W), ...], ..., [(B,C,H,W), ...]], 
+        # which is N_Crop times N_Layer of features
+        device = next(self.conv_seg.parameters()).device
+        h_img, w_img = current_size
+        h_stride, w_stride = slide_stride
+        h_crop, w_crop = slide_window
+        batch_size = feature_list[0][0].shape[0]
+        num_classes = self.num_classes
+
+        # Initialize predictions and counting matrix
+        preds = torch.zeros((batch_size, num_classes, h_img, w_img), device=device)
+        count_mat = torch.zeros((batch_size, 1, h_img, w_img), device=device)
+
+        i = 0
+        for h_idx in range(0, max(h_img - h_crop + h_stride - 1, 0) // h_stride + 1):
+            for w_idx in range(0, max(w_img - w_crop + w_stride - 1, 0) // w_stride + 1):
+                y1 = h_idx * h_stride
+                x1 = w_idx * w_stride
+                y2 = min(y1 + h_crop, h_img)
+                x2 = min(x1 + w_crop, w_img)
+                y1 = max(y2 - h_crop, 0)
+                x1 = max(x2 - w_crop, 0)
+
+                crop_seg_logit = self.predict(
+                    feature_list[i], size=(h_crop, w_crop)
+                )
+                preds += F.pad(
+                    crop_seg_logit, (x1, preds.shape[3] - x2, y1, preds.shape[2] - y2)
+                )
+                count_mat[:, :, y1:y2, x1:x2] += 1
+                i += 1
+
+        assert (count_mat == 0).sum() == 0, "Zero count in count matrix detected"
+        preds = preds / count_mat
+        if target_size is not None:
+            preds = resize(
+                input=preds,
+                size=target_size,
+                mode="bilinear",
+                align_corners=self.align_corners,
+            )
+        return preds
+

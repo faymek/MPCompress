@@ -391,3 +391,29 @@ class Dinov2OrgBackbone(nn.Module):
             token_res=token_res,
         )
 
+    def slide_encode(self, img, slide_window, slide_stride):
+        h_crop, w_crop = slide_window
+        h_stride, w_stride = slide_stride
+        _, _, h_img, w_img = img.shape
+
+        multi_crop_features = []
+        for h_idx in range(0, max(h_img - h_crop + h_stride - 1, 0) // h_stride + 1):
+            for w_idx in range(
+                0, max(w_img - w_crop + w_stride - 1, 0) // w_stride + 1
+            ):
+                y1 = h_idx * h_stride
+                x1 = w_idx * w_stride
+                y2 = min(y1 + h_crop, h_img)
+                x2 = min(x1 + w_crop, w_img)
+                y1 = max(y2 - h_crop, 0)
+                x1 = max(x2 - w_crop, 0)
+
+                # Crop and extract features
+                crop_img = img[:, :, y1:y2, x1:x2]
+                crop_features = self.encode(crop_img)
+                multi_crop_features.append([crop_features])
+
+        return multi_crop_features
+
+    def slide_decode_seg(self, feature_list, slide_res):
+        return [self.decode_seg(h[0], token_res=slide_res) for h in feature_list]
