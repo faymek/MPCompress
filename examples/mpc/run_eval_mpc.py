@@ -254,7 +254,7 @@ def eval_model(cfg):
 
         # 更新分割指标
         if "seg" in task_name:
-            logits = seg_head.predict(out_net["seg"], rescale=True)
+            logits = seg_head.predict(out_net["seg"], scale=model.patch_size)
             logits = center_crop(logits, padding)
             seg_preds = F.softmax(logits, dim=1).argmax(dim=1).squeeze(0)
             seg_preds = seg_preds.cpu().numpy()  # [H, W]

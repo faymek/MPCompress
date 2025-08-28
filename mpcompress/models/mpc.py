@@ -19,6 +19,7 @@ class MPC_I1(CompressionModel):  # VqganTokenUniformCodec
         super().__init__()
         self.vqgan = VqganBackbone(vqgan_config)
         self.vqgan_codec = UniformTokenCodec(self.vqgan.codebook_size)
+        self.patch_size = 16
 
     def forward(self, x):
         vqgan_enc = self.vqgan.encode(x)
@@ -51,6 +52,7 @@ class MPC_I2(CompressionModel):
         super().__init__()
         self.dino = Dinov2TimmBackbone(**dino_backbone)
         self.dino_codec = VitUnionLatentCodec(**dino_codec)
+        self.patch_size = self.dino.patch_size
 
     def forward(self, x):  # for lic training
         with torch.inference_mode():
@@ -131,6 +133,7 @@ class MPC_I12(CompressionModel):
         self.vqgan_codec = UniformTokenCodec(**vqgan_codec)
         self.dino = Dinov2TimmBackbone(**dino_backbone)
         self.dino_codec = VitUnionLatentCodecWithCtx(**dino_codec)
+        self.patch_size = self.dino.patch_size
 
         # additional branch for enhance branch1
         D_DINO = dino_codec["h_dim"]

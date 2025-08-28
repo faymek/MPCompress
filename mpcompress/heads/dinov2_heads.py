@@ -192,13 +192,21 @@ class Dinov2SegmentationHead(nn.Module):
         x = self.conv_seg(x)
         return x
 
-    def predict(self, inputs, rescale=True):
+    def predict(self, inputs, scale=1, size=None):
         seg_logits = self.forward(inputs)
         _, _, tok_h, tok_w = seg_logits.shape
-        if rescale:
+        if scale != 1:
             seg_logits = resize(
                 input=seg_logits,
-                size=(tok_h * self.patch_size, tok_w * self.patch_size),
+                size=(tok_h * scale, tok_w * scale),
+                mode="bilinear",
+                align_corners=self.align_corners,
+            )
+        elif size is not None:
+            assert isinstance(size, tuple)
+            seg_logits = resize(
+                input=seg_logits,
+                size=size,
                 mode="bilinear",
                 align_corners=self.align_corners,
             )
