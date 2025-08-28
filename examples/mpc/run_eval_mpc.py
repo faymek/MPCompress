@@ -225,6 +225,10 @@ def eval_model(cfg):
             **bpp_items,
         }
 
+        if hasattr(model, "get_feature_numel"):
+            numel = model.get_feature_numel(x_padded)
+            out_result["bpfp"] = sum(bits_items.values()) / numel
+
         # 计算图像质量指标
         iqa_result = {}
         if cfg.args.recon != 0:

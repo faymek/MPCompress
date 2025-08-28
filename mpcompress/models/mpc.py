@@ -92,6 +92,10 @@ class MPC_I2(CompressionModel):
 
             results["ibranch2"]= {"likelihoods": dino_out["likelihoods"]}
             return results
+    
+    def get_feature_numel(self, x):
+        h_dino = self.dino.encode(x)
+        return h_dino.numel()
 
     def compress(self, x):
         h_dino = self.dino.encode(x)
