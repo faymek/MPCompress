@@ -1,0 +1,38 @@
+multi_run:
+  62:
+  57:
+  52:
+  47:
+  42:
+  37:
+  32:
+  27:
+  22:
+
+model: 
+  type: Dinov2OrgSlidePatchVtmCodec
+  slide_size: [518, 518]
+  slide_stride: [259, 259]
+
+  dino_backbone:
+    model_size: small
+    img_size: 518
+    patch_size: 14
+    dynamic_size: false
+    slot: null
+    n_last_blocks: 1
+    ckpt_path: /home/faymek/MPCompress/data/models/backbone/dinov2_vits14_pretrain.pth
+
+  dino_codec:
+    cfg:
+      vtm_path: /home/faymek/Codec/VTM-21.0
+      model_type: dinov2
+      task: seg
+      max_v: 103.2168
+      min_v: -530.9767
+      trun_high: 20
+      trun_low: -20
+      trun_flag: true
+      quant_samples: 0
+      quant_type: uniform
+      bit_depth: 10 
