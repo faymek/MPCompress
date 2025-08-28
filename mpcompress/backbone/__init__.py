@@ -1,6 +1,7 @@
-from .base import Dinov2TimmBackbone, VqganBackbone
+from .base import VqganBackbone, Dinov2TimmBackbone, Dinov2OrgBackbone
 
 __all__ = [
-    "Dinov2TimmBackbone",
     "VqganBackbone",
+    "Dinov2TimmBackbone",
+    "Dinov2OrgBackbone",
 ]
