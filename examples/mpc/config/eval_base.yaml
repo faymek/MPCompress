@@ -43,15 +43,96 @@ datasets:
 
 # 头部模型配置
 heads:
-  # 分类头部
-  imagenet_cls_head:
+  imagenet_cls_small_last1:
+    type: Dinov2ClassifierHead
+    embed_dim: 384
+    layers: 1
+    checkpoint_path: /home/faymek/MPCompress/data/models/dinov2_cls_head/dinov2_vits14_linear_head.pth
+
+  imagenet_cls_base_last1:
+    type: Dinov2ClassifierHead
+    embed_dim: 768
+    layers: 1
+    checkpoint_path: /home/faymek/MPCompress/data/models/dinov2_cls_head/dinov2_vitb14_linear_head.pth
+
+  imagenet_cls_large_last1:
+    type: Dinov2ClassifierHead
+    embed_dim: 1024
+    layers: 1
+    checkpoint_path: /home/faymek/MPCompress/data/models/dinov2_cls_head/dinov2_vitl14_linear_head.pth
+
+  imagenet_cls_giant_last1:
+    type: Dinov2ClassifierHead
+    embed_dim: 1536
+    layers: 1
+    checkpoint_path: /home/faymek/MPCompress/data/models/dinov2_cls_head/dinov2_vitg14_linear_head.pth
+  
+  # 分类头部，最后四层
+  imagenet_cls_small_last4:
     type: Dinov2ClassifierHead
     embed_dim: 384
     layers: 4
     checkpoint_path: /home/faymek/MPCompress/data/models/dinov2_cls_head/dinov2_vits14_linear4_head.pth
+
+  imagenet_cls_base_last4:
+    type: Dinov2ClassifierHead
+    embed_dim: 768
+    layers: 4
+    checkpoint_path: /home/faymek/MPCompress/data/models/dinov2_cls_head/dinov2_vits14_linear4_head.pth
+
+  imagenet_cls_large_last4:
+    type: Dinov2ClassifierHead
+    embed_dim: 1024
+    layers: 4
+    checkpoint_path: /home/faymek/MPCompress/data/models/dinov2_cls_head/dinov2_vits14_linear4_head.pth
+  
+  imagenet_cls_giant_last4:
+    type: Dinov2ClassifierHead
+    embed_dim: 1536
+    layers: 4
+    checkpoint_path: /home/faymek/MPCompress/data/models/dinov2_cls_head/dinov2_vits14_linear4_head.pth
     
-  # VOC2012分割头部
-  voc2012_seg_head:
+  voc2012_seg_small_last1:
+    type: Dinov2SegmentationHead
+    in_channels: [384]
+    in_index: [0]
+    input_transform: resize_concat
+    channels: 384
+    num_classes: 21
+    patch_size: 16
+    checkpoint: /home/faymek/MPCompress/data/models/dinov2_seg_head/dinov2_vits14_voc2012_linear_head.pth
+  
+  voc2012_seg_base_last1:
+    type: Dinov2SegmentationHead
+    in_channels: [768]
+    in_index: [0]
+    input_transform: resize_concat
+    channels: 768
+    num_classes: 21
+    patch_size: 16
+    checkpoint: /home/faymek/MPCompress/data/models/dinov2_seg_head/dinov2_vitb14_voc2012_linear_head.pth
+
+  voc2012_seg_large_last1:
+    type: Dinov2SegmentationHead
+    in_channels: [1024]
+    in_index: [0]
+    input_transform: resize_concat
+    channels: 1024
+    num_classes: 21
+    patch_size: 16
+    checkpoint: /home/faymek/MPCompress/data/models/dinov2_seg_head/dinov2_vitl14_voc2012_linear_head.pth
+
+  voc2012_seg_giant_last1:
+    type: Dinov2SegmentationHead
+    in_channels: [1536]
+    in_index: [0]
+    input_transform: resize_concat
+    channels: 1536
+    num_classes: 21
+    patch_size: 16
+    checkpoint: /home/faymek/MPCompress/data/models/dinov2_seg_head/dinov2_vitg14_voc2012_linear_head.pth
+
+  voc2012_seg_small_last4:
     type: Dinov2SegmentationHead
     in_channels: [384, 384, 384, 384]
     in_index: [0, 1, 2, 3]
@@ -60,9 +141,39 @@ heads:
     num_classes: 21
     patch_size: 16
     checkpoint: /home/faymek/MPCompress/data/models/dinov2_seg_head/dinov2_vits14_voc2012_ms_head.pth
-    
+
+  voc2012_seg_base_last4:
+    type: Dinov2SegmentationHead
+    in_channels: [768, 768, 768, 768]
+    in_index: [0, 1, 2, 3]
+    input_transform: resize_concat
+    channels: 3072
+    num_classes: 21
+    patch_size: 16
+    checkpoint: /home/faymek/MPCompress/data/models/dinov2_seg_head/dinov2_vitb14_voc2012_ms_head.pth
+
+  voc2012_seg_large_last4:
+    type: Dinov2SegmentationHead
+    in_channels: [1024, 1024, 1024, 1024]
+    in_index: [0, 1, 2, 3]
+    input_transform: resize_concat
+    channels: 4096
+    num_classes: 21
+    patch_size: 16
+    checkpoint: /home/faymek/MPCompress/data/models/dinov2_seg_head/dinov2_vitl14_voc2012_ms_head.pth
+
+  voc2012_seg_giant_last4:
+    type: Dinov2SegmentationHead
+    in_channels: [1536, 1536, 1536, 1536]
+    in_index: [0, 1, 2, 3]
+    input_transform: resize_concat
+    channels: 6144
+    num_classes: 21
+    patch_size: 16
+    checkpoint: /home/faymek/MPCompress/data/models/dinov2_seg_head/dinov2_vitg14_voc2012_ms_head.pth
+
   # ADE20K分割头部
-  ade20k_seg_head:
+  ade20k_seg_small_last4:
     type: Dinov2SegmentationHead
     in_channels: [384, 384, 384, 384]
     in_index: [0, 1, 2, 3]
@@ -94,37 +205,24 @@ eval_tasks:
   # ImageNet分类任务
   imagenet_sel100_cls:
     dataset: imagenet_sel100
-    head: imagenet_cls_head
     metric: cls_metrics
     description: "ImageNet分类任务评估(100张图)"
 
   imagenet_sel2k_cls:
     dataset: imagenet_sel2k
-    head: imagenet_cls_head
     metric: cls_metrics
     description: "ImageNet分类任务评估(2000张图)"
-    
-  # VOC2012分割任务
+
   voc2012_sel20_seg:
     dataset: voc2012_sel20
-    head: voc2012_seg_head
     metric: voc2012_seg_metrics
-    description: "VOC2012分割任务评估"
+    description: "VOC2012分割任务评估(20张图)"
 
   voc2012_val_seg:
     dataset: voc2012_val
-    head: voc2012_seg_head
     metric: voc2012_seg_metrics
-    description: "VOC2012分割任务评估"
-    
-  # ADE20K分割任务
-  ade20k_val_seg:
-    dataset: ade20k_val
-    head: ade20k_seg_head
-    metric: ade20k_seg_metrics
-    description: "ADE20K分割任务评估"
+    description: "VOC2012分割任务评估(验证集)"
 
-# 杂项配置
 args:
   # 全局评估参数
   real: false  # 是否使用实际压缩

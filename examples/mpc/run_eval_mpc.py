@@ -128,7 +128,23 @@ def inference_x(model, x, real=False, recon=2, return_cls=False, return_seg=Fals
 
 @torch.inference_mode()
 def eval_model(cfg):
-    """评估模型的主函数"""
+    # 从配置中获取任务信息
+    task_name = cfg.args.task
+    assert task_name in cfg.eval_tasks, f"任务 {task_name} 不存在"
+    task_config = cfg.eval_tasks[task_name]
+
+    print(f"任务: {task_name}")
+    print(f"描述: {task_config.description}")
+    print(f"数据: {task_config.dataset}")
+    print(f"指标: {task_config.metric}")
+    print(f"模型: {cfg.model.type}")
+    print(f"头部: {cfg.args.head}")
+
+    # 获取数据集和指标配置
+    dataset_config = cfg.datasets[task_config.dataset]
+    metric_config = cfg.metrics[task_config.metric]
+    head_config = cfg.heads[cfg.args.head]
+
     device = torch.device(cfg.args.device)
     model = instantiate_class(cfg.model).to(device)
 
@@ -155,22 +171,6 @@ def eval_model(cfg):
 
     metric_meter = DictAverageMeter()
     records = []
-
-    # 从配置中获取任务信息
-    task_name = cfg.args.task
-    assert task_name in cfg.eval_tasks, f"任务 {task_name} 不存在"
-    task_config = cfg.eval_tasks[task_name]
-
-    # 获取数据集、头部和指标配置
-    dataset_config = cfg.datasets[task_config.dataset]
-    head_config = cfg.heads[task_config.head]
-    metric_config = cfg.metrics[task_config.metric]
-
-    print(f"任务: {task_name}")
-    print(f"描述: {task_config.description}")
-    print(f"数据集: {task_config.dataset}")
-    print(f"头部: {task_config.head}")
-    print(f"指标: {task_config.metric}")
 
     # 构建数据集
     print("构建数据集...")
@@ -317,6 +317,9 @@ def setup_args():
     )
     parser.add_argument("--checkpoint", type=str, required=True, help="模型检查点路径")
     parser.add_argument("--task", type=str, required=True, help="预定义的评估任务名称")
+    parser.add_argument(
+        "--head", type=str, required=True, help="头部模型名称，需要是预定义的头部模型"
+    )
     parser.add_argument("--quality", type=str, default="12.0", help="质量参数")
     parser.add_argument("--real", action="store_true", help="使用实际压缩")
     parser.add_argument(
@@ -330,20 +333,9 @@ def setup_args():
 
 def merge_args_to_config(config, args):
     """将命令行参数合并到配置中"""
-    # 创建运行时配置
-    config.args = OmegaConf.create(
-        {
-            "checkpoint": args.checkpoint,
-            "task": args.task,
-            "quality": args.quality,
-            "real": args.real,
-            "recon": args.recon,
-            "verbose": args.verbose,
-            "cuda": args.cuda,
-            "output_dir": args.output_dir,
-            "device": "cuda" if args.cuda and torch.cuda.is_available() else "cpu",
-        }
-    )
+    args_dict = dict(vars(args))
+    args_dict["device"] = "cuda" if args.cuda and torch.cuda.is_available() else "cpu"
+    config.args = OmegaConf.create(args_dict)
     return config
 
 
@@ -404,6 +396,7 @@ python examples/mpc/run_eval_mpc.py \
     --config examples/mpc/config/eval_base.yaml examples/mpc/config/eval_mpc2.yaml \
     --checkpoint "" \
     --task imagenet_sel100_cls \
+    --head imagenet_cls_small_last4 \
     --quality 1.0 \
     --cuda --recon 0 --real \
     --output_dir eval_imagenet_sel100_mpc2_real

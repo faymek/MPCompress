@@ -65,3 +65,8 @@ model:
     z_dim: 192
     ctx_dim: 256
     groups: 16
+
+allow_heads:
+  - imagenet_cls_small_last4
+  - voc2012_seg_small_last4
+  - ade20k_seg_small_last4
