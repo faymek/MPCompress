@@ -17,6 +17,7 @@ import importlib
 import shutil
 import tqdm
 import math
+import warnings
 
 from mpcompress.datasets import *
 from mpcompress.heads import *
@@ -27,6 +28,10 @@ from mpcompress.metrics.iqa_metrics import create_img_metrics, create_dist_metri
 from mpcompress.utils.tensor_ops import tensor2image, center_pad, center_crop
 from mpcompress.utils.utils import rename_key_by_rules
 # from mpcompress.utils.debug import extract_shapes
+
+# Disable Warnings
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 torch.backends.cudnn.deterministic = True
 torch.set_num_threads(1)
@@ -415,6 +420,6 @@ python examples/mpc/run_eval_mpc_ss.py \
     --task voc2012_sel20_seg \
     --head voc2012_seg_small_last1 \
     --quality 1.0 \
-    --cuda --recon 0 --real --verbose
+    --cuda --recon 0 --real --verbose \
     --output_dir eval_voc2012_sel20_slide_small_last1_vtm
 """

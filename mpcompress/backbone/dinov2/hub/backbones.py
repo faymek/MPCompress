@@ -54,7 +54,7 @@ def _make_dinov2_model(
 
     if pretrained:
         print('Load backbone checkpoint from local path: ', weights)
-        state_dict = torch.load(weights)    # Load weights from local path, I hate downloading from url
+        state_dict = torch.load(weights, weights_only=True)    # Load weights from local path, I hate downloading from url
         model.load_state_dict(state_dict, strict=True)
 
     return model

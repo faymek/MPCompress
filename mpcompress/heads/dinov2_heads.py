@@ -108,7 +108,7 @@ class Dinov2SegmentationHead(nn.Module):
         else:
             self.dropout = None
         if checkpoint is not None:
-            state_dict = torch.load(checkpoint)["state_dict"]
+            state_dict = torch.load(checkpoint, weights_only=True)["state_dict"]
             state_dict = {
                 k.replace("decode_head.", ""): v for k, v in state_dict.items()
             }
