@@ -1,14 +1,19 @@
 multi_run:
   q0300:
-    ckpt_path: /home/faymek/MPCompress/exp/MPC2-new/Q3.0/runner.best.pth.tar
-  # q0600:
-  #   ckpt_path: /home/faymek/MPCompress/exp/MPC2-new/Q6.0/runner.best.pth.tar
-  # q1200:
-  #   ckpt_path: /home/faymek/MPCompress/exp/MPC2-new/Q12.0/runner.best.pth.tar
-  # q2400:
-  #   ckpt_path: /home/faymek/MPCompress/exp/MPC2-new/Q24.0/runner.best.pth.tar
-  # q4800:
-  #   ckpt_path: /home/faymek/MPCompress/exp/MPC2-new/Q48.0/runner.best.pth.tar
+    load:
+      path: /home/faymek/MPCompress/exp/MPC2-new/Q3.0/runner.best.pth.tar
+  q0600:
+    load:
+      path: /home/faymek/MPCompress/exp/MPC2-new/Q6.0/runner.best.pth.tar
+  q1200:
+    load:
+      path: /home/faymek/MPCompress/exp/MPC2-new/Q12.0/runner.best.pth.tar
+  q2400:
+    load:
+      path: /home/faymek/MPCompress/exp/MPC2-new/Q24.0/runner.best.pth.tar
+  q4800:
+    load:
+      path: /home/faymek/MPCompress/exp/MPC2-new/Q48.0/runner.best.pth.tar
 
 load:
   path: /home/faymek/MPCompress/exp/MPC2-new/Q3.0/runner.best.pth.tar

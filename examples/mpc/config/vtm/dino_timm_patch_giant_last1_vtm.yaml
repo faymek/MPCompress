@@ -1,0 +1,40 @@
+multi_run:
+  62:
+  57:
+  52:
+  47:
+  42:
+  37:
+  32:
+  27:
+  22:
+
+
+model: 
+  type: Dinov2PatchVtmCodec
+  
+  dino_backbone:
+    model_size: giant
+    img_size: 256
+    patch_size: 16
+    dynamic_size: true
+    slot: -4
+    n_last_blocks: 1
+
+  dino_codec:
+    cfg:
+      vtm_path: /home/faymek/Codec/VTM-21.0
+      model_type: dinov2
+      task: seg
+      max_v: 103.2168
+      min_v: -530.9767
+      trun_high: 20
+      trun_low: -20
+      trun_flag: true
+      quant_samples: 0
+      quant_type: uniform
+      bit_depth: 10 
+
+allow_heads:
+  - imagenet_cls_giant_last1
+  - voc2012_seg_giant_last1

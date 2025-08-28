@@ -21,10 +21,12 @@ import math
 from mpcompress.datasets import *
 from mpcompress.heads import *
 from mpcompress.models.mpc import *
+from mpcompress.models.lamofc import *
 from mpcompress.metrics import *
 from mpcompress.metrics.iqa_metrics import create_img_metrics, create_dist_metrics
 from mpcompress.utils.tensor_ops import tensor2image, center_pad, center_crop
 from mpcompress.utils.utils import rename_key_by_rules
+# from mpcompress.utils.debug import extract_shapes
 
 torch.backends.cudnn.deterministic = True
 torch.set_num_threads(1)
@@ -68,6 +70,8 @@ def calc_bits_items(out):
             for name, likelihoods in out["likelihoods"].items()
         }
         return bits_items
+    elif "bits" in out:
+        return out["bits"]
     else:
         raise KeyError("Expected key `strings` or `likelihoods` in out_enc.")
 
@@ -87,11 +91,13 @@ def mpc_calc_bits_items(out):
 
 
 @torch.inference_mode()
-def inference_x(model, x, real=False, recon=2, return_cls=False, return_seg=False):
+def inference_x(
+    model, x, quality=1, real=False, recon=2, return_cls=False, return_seg=False
+):
     """推理单个文件"""
     if real:  # 实际压缩
         start = time.time()
-        out_enc = model.compress(x)
+        out_enc = model.compress(x, quality=quality)
         enc_time = time.time() - start
         start = time.time()
         out_net = model.decompress(
@@ -111,6 +117,7 @@ def inference_x(model, x, real=False, recon=2, return_cls=False, return_seg=Fals
         start = time.time()
         out_net = model.forward_test(
             x,
+            quality=quality,
             return_rec1=(recon == 1),
             return_rec2=(recon == 2),
             return_cls=return_cls,
@@ -148,7 +155,7 @@ def eval_model(cfg):
     device = torch.device(cfg.args.device)
     model = instantiate_class(cfg.model).to(device)
 
-    if cfg.load:
+    if "load" in cfg and cfg.load:
         checkpoint = torch.load(cfg.load.path, map_location="cpu", weights_only=True)
         state_dict = checkpoint["state_dict"]
         if cfg.load.rules:
@@ -159,7 +166,7 @@ def eval_model(cfg):
                     sd_new[new_key] = state_dict[org_key]
             state_dict = sd_new
         model.load_state_dict(state_dict, strict=cfg.load.strict)
-    else:
+    elif cfg.args.checkpoint:
         checkpoint = torch.load(
             cfg.args.checkpoint, map_location="cpu", weights_only=True
         )
@@ -211,12 +218,14 @@ def eval_model(cfg):
         time_items, bits_items, out_net = inference_x(
             model,
             x_padded,
+            quality=cfg.args.quality,
             real=cfg.args.real,
             recon=cfg.args.recon,
             return_cls=cls_head is not None,
             return_seg=seg_head is not None,
         )
-        bpp_items = {f"bpp_{k}": v / x.size(0) / x.size(2) / x.size(3) for k, v in bits_items.items()}
+        num_pixels = x.size(0) * x.size(2) * x.size(3)
+        bpp_items = {f"bpp_{k}": v / num_pixels for k, v in bits_items.items()}
         bpp = sum(bpp_items.values())
 
         out_result = {
@@ -382,16 +391,18 @@ if __name__ == "__main__":
     # 将命令行参数合并到配置中
     config = merge_args_to_config(config, args)
     if "multi_run" in config:
-        for key, value in config.multi_run.items():
-            args.quality = key
-            config.args.quality = key
-            config.load.path = value.ckpt_path
-            main(config, args)
+        this_cfg = config.copy()
+        for quality, patchy_cfg in config.multi_run.items():
+            args.quality = quality
+            this_cfg.args.quality = quality
+            if patchy_cfg is not None:
+                this_cfg = OmegaConf.merge(this_cfg, patchy_cfg)
+            main(this_cfg, args)
     else:
         main(config, args)
 
 
-""" example usage:
+""" example usage for MPC2:
 python examples/mpc/run_eval_mpc.py \
     --config examples/mpc/config/eval_base.yaml examples/mpc/config/eval_mpc2.yaml \
     --checkpoint "" \
@@ -400,4 +411,15 @@ python examples/mpc/run_eval_mpc.py \
     --quality 1.0 \
     --cuda --recon 0 --real \
     --output_dir eval_imagenet_sel100_mpc2_real
+"""
+
+""" example usage for VTM feature coding:
+python examples/mpc/run_eval_mpc.py \
+    --config examples/mpc/config/eval_base.yaml examples/mpc/config/vtm/dino_timm_patch_small_last1_vtm.yaml \
+    --checkpoint "" \
+    --task voc2012_sel20_seg \
+    --head voc2012_seg_small_last1 \
+    --quality 1.0 \
+    --cuda --recon 0 --real --verbose \
+    --output_dir eval_voc2012_sel20_small_last1_vtm
 """

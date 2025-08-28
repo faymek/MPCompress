@@ -193,6 +193,7 @@ class MPC_I12(CompressionModel):
         return_rec2=False,
         return_cls=False,
         return_seg=False,
+        **kwargs,
     ):
         with torch.inference_mode():
             vqgan_enc = self.vqgan.encode(x)
