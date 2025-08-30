@@ -61,12 +61,12 @@ class MPC_I2(CompressionModel):
                 x.shape[2] // self.dino.patch_size,
                 x.shape[3] // self.dino.patch_size,
             )
-            o_dino = self.dino.decode_whole(h_dino, token_res)[0]
+            o_dino = self.dino.decode_whole(h_dino)[-1]
 
         h_dino = h_dino.clone()
         dino_out = self.dino_codec(h_dino, token_res)
         h_dino_hat = dino_out["h_hat"]
-        o_dino_hat = self.dino.decode_whole(h_dino_hat)[0]
+        o_dino_hat = self.dino.decode_whole(h_dino_hat)[-1]
 
         return {
             "h_dino_hat": o_dino_hat,
@@ -160,12 +160,12 @@ class MPC_I12(CompressionModel):
                 x.shape[2] // self.dino.patch_size,
                 x.shape[3] // self.dino.patch_size,
             )
-            o_dino = self.dino.decode_whole(h_dino)[0]
+            o_dino = self.dino.decode_whole(h_dino)[-1]
 
         h_dino = h_dino.clone()
         dino_out = self.dino_codec(h_dino, h_vqgan_ctx, token_res)
         h_dino_hat = dino_out["h_dino_hat"]
-        o_dino_hat = self.dino.decode_whole(h_dino_hat, token_res)[0]
+        o_dino_hat = self.dino.decode_whole(h_dino_hat)[-1]
 
         h_hat_for_vqgan = self.cond_dec_for_vqgan(
             torch.cat([dino_out["h_hat_share"].detach(), h_vqgan_ctx], dim=1)
