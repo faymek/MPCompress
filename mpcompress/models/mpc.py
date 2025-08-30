@@ -21,13 +21,13 @@ class MPC_I1(CompressionModel):  # VqganTokenUniformCodec
         self.vqgan_codec = UniformTokenCodec(self.vqgan.codebook_size)
         self.patch_size = 16
 
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         vqgan_enc = self.vqgan.encode(x)
         vqgan_out = self.vqgan_codec(vqgan_enc["tokens"])
         x_hat = self.vqgan.decode(vqgan_enc["z_q"])
         return {"likelihoods": vqgan_out["likelihoods"], "x_hat": x_hat}
 
-    def compress(self, x):
+    def compress(self, x, **kwargs):
         vqgan_enc = self.vqgan.encode(x)
         vqgan_out = self.vqgan_codec.compress(vqgan_enc["tokens"])
         return vqgan_out
@@ -54,7 +54,7 @@ class MPC_I2(CompressionModel):
         self.dino_codec = VitUnionLatentCodec(**dino_codec)
         self.patch_size = self.dino.patch_size
 
-    def forward(self, x):  # for lic training
+    def forward(self, x, **kwargs):  # for lic training
         with torch.inference_mode():
             h_dino = self.dino.encode(x)
             token_res = (
@@ -97,7 +97,7 @@ class MPC_I2(CompressionModel):
         h_dino = self.dino.encode(x)
         return h_dino.numel()
 
-    def compress(self, x):
+    def compress(self, x, **kwargs):
         h_dino = self.dino.encode(x)
         token_res = (
             x.shape[2] // self.dino.patch_size,
@@ -148,7 +148,7 @@ class MPC_I12(CompressionModel):
             conv(D_VQGAN, D_VQGAN, kernel_size=3, stride=1),
         )
 
-    def forward(self, x):  # for training
+    def forward(self, x, **kwargs):  # for training
         with torch.inference_mode():
             vqgan_enc = self.vqgan.encode(x)
             # vqgan_out = self.vqgan_codec(vqgan_enc["tokens"]) # just constant likelihoods
@@ -232,7 +232,7 @@ class MPC_I12(CompressionModel):
             results["ibranch2"]= {"likelihoods": dino_out["likelihoods"]}
             return results
 
-    def compress(self, x):
+    def compress(self, x, **kwargs):
         vqgan_enc = self.vqgan.encode(x)
         vqgan_out = self.vqgan_codec.compress(vqgan_enc["tokens"])
         h_vqgan_ctx = vqgan_enc["z_q"]
