@@ -197,14 +197,14 @@ class VitUnionLatentCodec(CompressionModel):
 
 
 class HyperEncoderWithCtx(nn.Module):
-    def __init__(self, N, M, D_VQGAN):
+    def __init__(self, z_dim, y_dim, ctx_dim):
         super().__init__()
         self.h_a = nn.Sequential(
-            conv(M + D_VQGAN, N, kernel_size=3, stride=1),
+            conv(y_dim + ctx_dim, z_dim, kernel_size=3, stride=1),
             nn.ReLU(inplace=True),
-            conv(N, N, kernel_size=5, stride=2),
+            conv(z_dim, z_dim, kernel_size=5, stride=2),
             nn.ReLU(inplace=True),
-            conv(N, N, kernel_size=5, stride=2),
+            conv(z_dim, z_dim, kernel_size=5, stride=2),
         )
 
     def forward(self, x, ctx):
@@ -212,19 +212,19 @@ class HyperEncoderWithCtx(nn.Module):
 
 
 class HyperDecoderWithCtx(nn.Module):
-    def __init__(self, N, M, D_VQGAN):
+    def __init__(self, z_dim, y_dim, ctx_dim):
         super().__init__()
         self.h_s = nn.Sequential(
-            deconv(N, N, kernel_size=5, stride=2),
+            deconv(z_dim, z_dim, kernel_size=5, stride=2),
             nn.ReLU(inplace=True),
-            deconv(N, N * 3 // 2, kernel_size=5, stride=2),
+            deconv(z_dim, z_dim * 3 // 2, kernel_size=5, stride=2),
             nn.ReLU(inplace=True),
-            deconv(N * 3 // 2, N * 2, kernel_size=3, stride=1),
+            deconv(z_dim * 3 // 2, z_dim * 2, kernel_size=3, stride=1),
         )
         self.fusion = nn.Sequential(
-            conv(N * 2 + D_VQGAN, N * 2, kernel_size=3, stride=1),
+            conv(z_dim * 2 + ctx_dim, z_dim * 2, kernel_size=3, stride=1),
             nn.ReLU(inplace=True),
-            conv(N * 2, N * 2, kernel_size=3, stride=1),
+            conv(z_dim * 2, z_dim * 2, kernel_size=3, stride=1),
         )
 
     def forward(self, x, ctx):
