@@ -40,14 +40,38 @@ class VqganBackbone(nn.Module):
 
 
 class Dinov2TimmBackbone(nn.Module):
-    # dinov2 of timm implementation, support varing patch size and dynamic image size
+    """    
+    This class extends the DINOv2 model to provide flexible feature extraction.
+    The DINOv2 backbone implemented with timm supports variable patch sizes and dynamic input image sizes.
+
+    Args:
+        model_size (str): Model variant specification ('small', 'base', 'large', 'giant'). Defaults to 'small'.
+        img_size (int): Base input image size. Defaults to 256.
+        patch_size (int): Patch embedding size. Defaults to 16.
+        dynamic_size (bool): Whether to support dynamically varying input sizes. Defaults to False.
+        slot (int or None): Block slicing position for feature extraction. Follows Python list slicing conventions. 
+                   Defaults to -4.
+        n_last_blocks (int): Number of final blocks to utilize for feature aggregation. Defaults to 4.
+        ckpt_path (str, optional): Path to pre-trained checkpoint for initialization. Defaults to None.
+    
+    Note:
+        The `slot` parameter determines the splitting point for dividing the network blocks into:
+        - Front part: blocks[:slot] 
+        - Back part: blocks[slot:]
+        
+        For example, with slot = -4 and blocks = [0,1,2,3,4,5,6,7,8,9]:
+        - Front part: blocks[:-4] = [0,1,2,3,4,5]
+        - Back part: blocks[-4:] = [6,7,8,9]
+        
+        Intermediate feature are extracted after the front part and before the back part.
+    """
     def __init__(
         self,
         model_size="small",
         img_size=256,
         patch_size=16,
         dynamic_size=False,
-        slot=-4,  # cut position, -4 means the last 4th block
+        slot=-4,  # cut position
         n_last_blocks=4,  # number of last blocks to take
         ckpt_path=None,
     ):
@@ -113,7 +137,7 @@ class Dinov2TimmBackbone(nn.Module):
         self,
         x,
         slot=-4,
-        n=4,  # Layers or n last layers to take
+        n=4,  # layer list or n last layers to take
         norm=True,
         return_format="[whole]",
         token_res=None,
@@ -124,25 +148,40 @@ class Dinov2TimmBackbone(nn.Module):
         )
         dino = self.model
 
-        # If n is an int, take the n last blocks. If it's a list, take them
         multi_outputs = []
-        if slot is None:
-            multi_outputs.append(x)  # x is just the last layer
-        else:
-            total_block_len = len(dino.blocks)
-            if isinstance(n, int):
-                blocks_to_take = range(total_block_len - n, total_block_len)
-            else:
-                blocks_to_take = n
 
-            for i, blk in enumerate(dino.blocks[slot:]):
-                x = blk(x)
-                block_num = total_block_len + slot + i
-                if block_num in blocks_to_take:
-                    multi_outputs.append(x)
-            assert len(multi_outputs) == len(blocks_to_take), (
-                f"only {len(multi_outputs)} / {len(blocks_to_take)} blocks found"
-            )
+        # If n is an int, take the n last blocks. If it's a list, take them
+        total_layers = len(dino.blocks)
+        if isinstance(n, int):
+            need_layers = range(total_layers - n, total_layers)
+        elif isinstance(n, list):
+            need_layers = n
+
+        # locate the input feature x is after the layer of curr_layer
+        if slot is None:
+            curr_layer = total_layers - 1
+        elif isinstance(slot, int):
+            if slot < 0:
+                curr_layer = total_layers + slot - 1
+            else:
+                curr_layer = slot - 1
+        else:
+            raise ValueError(f"slot must be an int or None, got {type(slot)}")
+        
+        if curr_layer > min(need_layers):
+            raise ValueError(f"not possible to take required layers, input layer: {curr_layer}, need layers: {need_layers}")
+        elif curr_layer == min(need_layers):
+            # input feature is just needed
+            multi_outputs.append(x)
+
+        for i in range(curr_layer+1, total_layers):
+            x = dino.blocks[i](x)
+            if i in need_layers:
+                multi_outputs.append(x)
+
+        assert len(multi_outputs) == len(need_layers), (
+            f"only {len(multi_outputs)} / {len(need_layers)} blocks found"
+        )
 
         if norm:
             multi_outputs = [dino.norm(out) for out in multi_outputs]
