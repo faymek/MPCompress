@@ -21,15 +21,16 @@ class VqganBackbone(nn.Module):
         # so we use z_q as the context
         z = self.vqgan.quant_conv(self.vqgan.encoder(2 * x - 1))
         z_q_prime, _, (_, _, idxs_1d) = self.vqgan.quantize(z)
-        z_shape = z_q_prime.shape[-2:]
-        tokens = idxs_1d.reshape(z_shape[0], z_shape[1])
+        B, C, H, W = z_q_prime.shape
+        tokens = idxs_1d.reshape(B, H, W)
         z_q = self.vqgan.quantize.embedding(idxs_1d)
-        z_q = rearrange(z_q, "(H W) C -> 1 C H W", H=z_shape[0], W=z_shape[1])
-        return {"z": z, "z_q": z_q, "tokens": tokens, "shape": z_shape}
+        z_q = rearrange(z_q, "(B H W) C -> B C H W", B=B, H=H, W=W)
+        return {"z": z, "z_q": z_q, "tokens": tokens, "shape": (H, W)}
 
     def tokens_to_features(self, tokens):
+        B, H, W = tokens.shape
         z_q = self.vqgan.quantize.embedding(tokens.flatten())
-        z_q = rearrange(z_q, "(H W) C -> 1 C H W", H=tokens.shape[0], W=tokens.shape[1])
+        z_q = rearrange(z_q, "(B H W) C -> B C H W", B=B, H=H, W=W)
         return z_q
 
     def decode(self, z_q):
