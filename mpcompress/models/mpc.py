@@ -163,8 +163,9 @@ class MPC_I12(CompressionModel):
             o_dino = self.dino.decode_whole(h_dino)[-1]
 
         h_dino = h_dino.clone()
+        h_vqgan_ctx = h_vqgan_ctx.clone()
         dino_out = self.dino_codec(h_dino, h_vqgan_ctx, token_res)
-        h_dino_hat = dino_out["h_dino_hat"]
+        h_dino_hat = dino_out["h_hat"]
         o_dino_hat = self.dino.decode_whole(h_dino_hat)[-1]
 
         h_hat_for_vqgan = self.cond_dec_for_vqgan(
@@ -178,9 +179,9 @@ class MPC_I12(CompressionModel):
             x_hat = None
 
         return {
-            "h_vqgan": h_vqgan,
+            "h_vqgan": h_vqgan.clone(),
             "h_vqgan_hat": h_hat_for_vqgan,
-            "h_dino": o_dino,
+            "h_dino": o_dino.clone(),
             "h_dino_hat": o_dino_hat,
             "likelihoods": dino_out["likelihoods"],
             "x_hat": x_hat,
