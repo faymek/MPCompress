@@ -35,9 +35,6 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 torch.backends.cudnn.deterministic = True
 torch.set_num_threads(1)
 
-img_metrics_dict = create_img_metrics()
-dist_metrics_dict = create_dist_metrics()
-
 
 def get_obj_from_str(string, reload=False):
     if "." in string:
@@ -203,6 +200,14 @@ def eval_model(cfg):
         print("构建分割头部...")
         seg_head = instantiate_class(head_config).to(device).eval()
         seg_metric = instantiate_class(metric_config)
+
+    # 创建图像和分布指标
+    print("创建图像质量指标...")
+    img_metrics_dict = {}
+    dist_metrics_dict = {}
+    if cfg.args.recon != 0:
+        img_metrics_dict = create_img_metrics()
+        dist_metrics_dict = create_dist_metrics()
 
     # 创建输出目录
     if cfg.args.output_dir:
@@ -404,7 +409,8 @@ if __name__ == "__main__":
         main(config, args)
 
 
-""" example usage for MPC2:
+"""
+# example usage for MPC2:
 python examples/mpc/run_eval_mpc.py \
     --config examples/mpc/config/eval_base.yaml examples/mpc/config/eval_mpc2.yaml \
     --checkpoint "" \
@@ -413,9 +419,18 @@ python examples/mpc/run_eval_mpc.py \
     --quality 1.0 \
     --cuda --recon 0 --real \
     --output_dir eval_imagenet_sel100_mpc2_real
-"""
 
-""" example usage for VTM feature coding:
+# example usage for MPC12:
+python examples/mpc/run_eval_mpc.py \
+    --config examples/mpc/config/eval_base.yaml examples/mpc/config/eval_mpc12.yaml \
+    --checkpoint "" \
+    --task voc2012_sel20_seg \
+    --head voc2012_seg_small_last4 \
+    --quality 1.0 \
+    --cuda --recon 2 --real \
+    --output_dir eval_voc2012_sel20_mpc12_real
+
+# example usage for VTM feature coding:
 python examples/mpc/run_eval_mpc.py \
     --config examples/mpc/config/eval_base.yaml examples/mpc/config/vtm/dino_timm_patch_small_last1_vtm.yaml \
     --checkpoint "" \

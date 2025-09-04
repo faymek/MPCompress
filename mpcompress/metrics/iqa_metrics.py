@@ -1,3 +1,8 @@
+"""Metrics factory and lightweight cached accessors (no third-party cache).
+
+避免在 import 时就实例化所有指标；通过简单的模块级缓存字典按需构建并复用。
+"""
+
 import torch
 import torch.nn.functional as F
 from torchvision.transforms import ToTensor, ToPILImage
@@ -7,8 +12,11 @@ from PIL import Image
 import os
 from typing import Dict, Callable, Union
 
+
 # Global configuration
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+# Per-metric function cache: name -> metric callable
+_METRIC_FUNC_CACHE: Dict[str, Callable] = {}
 
 
 def tensor2image(x: torch.Tensor) -> Image.Image:
@@ -85,40 +93,71 @@ def padded_ms_ssim_db(
 
 
 def create_img_metrics(metric_names: Union[str, list] = None) -> Dict[str, Callable]:
-    all_metrics = {
-        "PSNR": pyiqa.create_metric("psnr", device=DEVICE),
-        "MS-SSIM": padded_ms_ssim,
-        "MS-SSIM-dB": padded_ms_ssim_db,
-        "VIF": pyiqa.create_metric("vif", device=DEVICE),
-        "GMSD": pyiqa.create_metric("gmsd", device=DEVICE),
-        "LPIPS-Alex": pyiqa.create_metric("lpips", device=DEVICE),
-        "LPIPS-VGG": pyiqa.create_metric("lpips-vgg", device=DEVICE),
-        "DISTS": pyiqa.create_metric("dists", device=DEVICE),
-        "PieAPP": pyiqa.create_metric("pieapp", device=DEVICE),
-        "AHIQ": pyiqa.create_metric("ahiq", device=DEVICE),
-        "CLIP-SIM": create_clip_sim_metric("ViT-B/32"),
-        "TOPIQ-FR": pyiqa.create_metric("topiq_fr", device=DEVICE),  # higher is better
-        "TOPIQ-NR": pyiqa.create_metric("topiq_nr", device=DEVICE),
-        "MUSIQ": pyiqa.create_metric("musiq", device=DEVICE),
+    """Create image metrics dict; heavy metrics are instantiated lazily per metric.
+
+    This function now uses a per-metric function cache so repeated requests for
+    the same metric name reuse the callable.
+    """
+    metric_factories: Dict[str, Callable[[], Callable]] = {
+        "PSNR": lambda: pyiqa.create_metric("psnr", device=DEVICE),
+        "MS-SSIM": lambda: padded_ms_ssim,
+        "MS-SSIM-dB": lambda: padded_ms_ssim_db,
+        "VIF": lambda: pyiqa.create_metric("vif", device=DEVICE),
+        "GMSD": lambda: pyiqa.create_metric("gmsd", device=DEVICE),
+        "LPIPS-Alex": lambda: pyiqa.create_metric("lpips", device=DEVICE),
+        "LPIPS-VGG": lambda: pyiqa.create_metric("lpips-vgg", device=DEVICE),
+        "DISTS": lambda: pyiqa.create_metric("dists", device=DEVICE),
+        "PieAPP": lambda: pyiqa.create_metric("pieapp", device=DEVICE),
+        "AHIQ": lambda: pyiqa.create_metric("ahiq", device=DEVICE),
+        "CLIP-SIM": lambda: create_clip_sim_metric("ViT-B/32"),
+        "TOPIQ-FR": lambda: pyiqa.create_metric("topiq_fr", device=DEVICE),
+        "TOPIQ-NR": lambda: pyiqa.create_metric("topiq_nr", device=DEVICE),
+        "MUSIQ": lambda: pyiqa.create_metric("musiq", device=DEVICE),
     }
 
     if metric_names is None:
-        return all_metrics
+        names = list(metric_factories.keys())
+    elif isinstance(metric_names, str):
+        names = [metric_names]
+    else:
+        names = list(metric_names)
 
-    if isinstance(metric_names, str):
-        metric_names = [metric_names]
-
-    # Validate metric names
-    invalid_metrics = set(metric_names) - set(all_metrics.keys())
+    invalid_metrics = set(names) - set(metric_factories.keys())
     if invalid_metrics:
         raise ValueError(
-            f"Unsupported metric names: {invalid_metrics}. Available metrics: {list(all_metrics.keys())}"
+            f"Unsupported metric names: {invalid_metrics}. Available metrics: {list(metric_factories.keys())}"
         )
 
-    return {name: all_metrics[name] for name in metric_names}
+    def get_or_create_metric(name: str) -> Callable:
+        if name not in _METRIC_FUNC_CACHE:
+            _METRIC_FUNC_CACHE[name] = metric_factories[name]()
+        return _METRIC_FUNC_CACHE[name]
+
+    return {name: get_or_create_metric(name) for name in names}
 
 
-def create_dist_metrics() -> Dict[str, Callable]:
-    return {
-        "FID": pyiqa.create_metric("fid", device=DEVICE),
+def create_dist_metrics(metric_names: Union[str, list] = None) -> Dict[str, Callable]:
+    """Create distribution-distance metrics dict with per-metric lazy cache."""
+    metric_factories: Dict[str, Callable[[], Callable]] = {
+        "FID": lambda: pyiqa.create_metric("fid", device=DEVICE),
     }
+
+    if metric_names is None:
+        names = list(metric_factories.keys())
+    elif isinstance(metric_names, str):
+        names = [metric_names]
+    else:
+        names = list(metric_names)
+
+    invalid_metrics = set(names) - set(metric_factories.keys())
+    if invalid_metrics:
+        raise ValueError(
+            f"Unsupported dist metric names: {invalid_metrics}. Available: {list(metric_factories.keys())}"
+        )
+
+    def get_or_create_metric(name: str) -> Callable:
+        if name not in _METRIC_FUNC_CACHE:
+            _METRIC_FUNC_CACHE[name] = metric_factories[name]()
+        return _METRIC_FUNC_CACHE[name]
+
+    return {name: get_or_create_metric(name) for name in names}
