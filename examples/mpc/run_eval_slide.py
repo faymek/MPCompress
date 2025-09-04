@@ -21,8 +21,7 @@ import warnings
 
 from mpcompress.datasets import *
 from mpcompress.heads import *
-from mpcompress.models.mpc import *
-from mpcompress.models.lamofc import *
+from mpcompress.models import *
 from mpcompress.metrics import *
 from mpcompress.metrics.iqa_metrics import create_img_metrics, create_dist_metrics
 from mpcompress.utils.tensor_ops import tensor2image, center_pad, center_crop
