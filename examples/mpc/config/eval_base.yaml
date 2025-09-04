@@ -40,6 +40,7 @@ datasets:
     img_path: images/validation
     seg_map_path: annotations/validation
     file_list:
+    reduce_zero_label: true
 
 # 头部模型配置
 heads:
@@ -183,6 +184,77 @@ heads:
     patch_size: 16
     checkpoint: /home/faymek/MPCompress/data/models/dinov2_seg_head/dinov2_vits14_ade20k_ms_head.pth
 
+  ade20k_seg_small_last1:
+    type: Dinov2SegmentationHead
+    in_channels: [384]
+    in_index: [0]
+    input_transform: resize_concat
+    channels: 384
+    num_classes: 150
+    patch_size: 16
+    checkpoint: /home/faymek/MPCompress/data/models/dinov2_seg_head/dinov2_vits14_ade20k_linear_head.pth
+
+  ade20k_seg_base_last1:
+    type: Dinov2SegmentationHead
+    in_channels: [768]
+    in_index: [0]
+    input_transform: resize_concat
+    channels: 768
+    num_classes: 150
+    patch_size: 16
+    checkpoint: /home/faymek/MPCompress/data/models/dinov2_seg_head/dinov2_vitb14_ade20k_linear_head.pth
+
+  ade20k_seg_large_last1:
+    type: Dinov2SegmentationHead
+    in_channels: [1024]
+    in_index: [0]
+    input_transform: resize_concat
+    channels: 1024
+    num_classes: 150
+    patch_size: 16
+    checkpoint: /home/faymek/MPCompress/data/models/dinov2_seg_head/dinov2_vitl14_ade20k_linear_head.pth
+
+  ade20k_seg_giant_last1:
+    type: Dinov2SegmentationHead
+    in_channels: [1536]
+    in_index: [0]
+    input_transform: resize_concat
+    channels: 1536
+    num_classes: 150
+    patch_size: 16
+    checkpoint: /home/faymek/MPCompress/data/models/dinov2_seg_head/dinov2_vitg14_ade20k_linear_head.pth
+
+  ade20k_seg_base_last4:
+    type: Dinov2SegmentationHead
+    in_channels: [768, 768, 768, 768]
+    in_index: [0, 1, 2, 3]
+    input_transform: resize_concat
+    channels: 3072
+    num_classes: 150
+    patch_size: 16
+    checkpoint: /home/faymek/MPCompress/data/models/dinov2_seg_head/dinov2_vitb14_ade20k_ms_head.pth
+
+  ade20k_seg_large_last4:
+    type: Dinov2SegmentationHead
+    in_channels: [1024, 1024, 1024, 1024]
+    in_index: [0, 1, 2, 3]
+    input_transform: resize_concat
+    channels: 4096
+    num_classes: 150
+    patch_size: 16
+    checkpoint: /home/faymek/MPCompress/data/models/dinov2_seg_head/dinov2_vitl14_ade20k_ms_head.pth
+  
+  ade20k_seg_giant_last4:
+    type: Dinov2SegmentationHead
+    in_channels: [1536, 1536, 1536, 1536]
+    in_index: [0, 1, 2, 3]
+    input_transform: resize_concat
+    channels: 6144
+    num_classes: 150
+    patch_size: 16
+    checkpoint: /home/faymek/MPCompress/data/models/dinov2_seg_head/dinov2_vitg14_ade20k_ms_head.pth
+
+
 # 评估指标配置
 metrics:
   # 分类指标
@@ -222,6 +294,11 @@ eval_tasks:
     dataset: voc2012_val
     metric: voc2012_seg_metrics
     description: "VOC2012分割任务评估(验证集)"
+
+  ade20k_val_seg:
+    dataset: ade20k_val
+    metric: ade20k_seg_metrics
+    description: "ADE20K分割任务评估(验证集)"
 
 args:
   # 全局评估参数
