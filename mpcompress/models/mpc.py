@@ -9,6 +9,7 @@ from mpcompress.backbone.base import Dinov2TimmBackbone, VqganBackbone
 from mpcompress.token_codecs.base import UniformTokenCodec
 from mpcompress.latent_codecs.vit_feature_codec import (
     VitUnionLatentCodec,
+    VitSeparateLatentCodec,
     VitUnionLatentCodecWithCtx,
 )
 
@@ -120,6 +121,18 @@ class MPC_I2(CompressionModel):
         if return_seg:
             results["seg"] = self.dino.decode_seg(dino_out["h_hat"], token_res)
         return results
+
+
+@register_model("MPC_I2_Separate")
+class MPC_I2_Separate(MPC_I2):
+    def __init__(
+        self,
+        dino_backbone={},
+        dino_codec={},
+        **kwargs,
+    ):
+        super().__init__(dino_backbone, dino_codec, **kwargs)
+        self.dino_codec = VitSeparateLatentCodec(**dino_codec)
 
 
 @register_model("MPC_I12")
