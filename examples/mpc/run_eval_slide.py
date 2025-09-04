@@ -268,7 +268,7 @@ def eval_model(cfg):
             logits = cls_head.forward(out_net["cls"])
             cls_preds = F.softmax(logits, dim=1)
             values, top_indices = torch.topk(cls_preds, k=5, dim=1)
-            cls_metric.update(top_indices, [img_meta["target"]])
+            cls_metric.update(top_indices, [img_meta["cls_label"]])
 
         # 更新分割指标
         if "seg" in task_name:
@@ -279,11 +279,9 @@ def eval_model(cfg):
                 slide_stride=(259, 259),
                 target_size=(x.shape[2], x.shape[3]),
             )
-            seg_preds = F.softmax(logits, dim=1).argmax(dim=1).squeeze(0)
+            seg_preds = logits.argmax(dim=1).squeeze(0)
             seg_preds = seg_preds.cpu().numpy()  # [H, W]
-
-            seg_label_path = img_meta["seg_label_path"]
-            seg_label = np.array(Image.open(seg_label_path))  # [H, W]
+            seg_label = img_meta["seg_label"]
             seg_metric.update(seg_preds, seg_label)
 
         # 记录结果

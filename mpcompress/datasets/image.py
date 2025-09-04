@@ -1,6 +1,7 @@
 from pathlib import Path
 from PIL import Image
 from torch.utils.data import Dataset
+import numpy as np
 
 
 class ImageFolder(Dataset):
@@ -133,7 +134,7 @@ class ClassificationDataset(Dataset):
             "img_path": img_path,
             "img_name": img_name,
             "ori_size": img.size if hasattr(img, "size") else img.shape[-2:],
-            "target": self.labels_dict.get(img_name, None),
+            "cls_label": self.labels_dict.get(img_name, None),
         }
 
         return img, img_meta
@@ -147,6 +148,7 @@ class SegmentationDataset(Dataset):
         img_path="JPEGImages",
         seg_map_path="SegmentationClass",
         file_list=None,
+        reduce_zero_label=False,
         **kwargs,
     ):
         """
@@ -164,6 +166,7 @@ class SegmentationDataset(Dataset):
         self.img_path = img_path
         self.seg_map_path = seg_map_path
         self.file_list = file_list
+        self.reduce_zero_label = reduce_zero_label
 
         img_dir = self.root / self.img_path
         if not img_dir.is_dir():
@@ -193,12 +196,19 @@ class SegmentationDataset(Dataset):
         img = Image.open(img_path).convert("RGB")
         if self.transform:
             img = self.transform(img)
+        
+        seg_label_path = str(self.root / self.seg_map_path / f"{img_name}.png")
+        seg_label = np.array(Image.open(seg_label_path))
+        if self.reduce_zero_label:
+            seg_label = seg_label - 1  # for uint8, 2->1, 1->0, 0->255
+        seg_label = seg_label.astype(np.int64)
 
         img_meta = {
             "img_path": img_path,
             "img_name": img_name,
             "ori_size": img.size if hasattr(img, "size") else img.shape[-2:],
-            "seg_label_path": str(self.root / self.seg_map_path / f"{img_name}.png"),
+            "seg_label_path": seg_label_path,
+            "seg_label": seg_label,
         }
 
         return img, img_meta
