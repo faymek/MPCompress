@@ -1,12 +1,16 @@
 import hashlib
 import torch
 import torch.nn as nn
+import numpy as np
 
 
 def extract_shapes(nested_structure):
     if isinstance(nested_structure, torch.Tensor):
         shape = tuple(nested_structure.shape)
         return f"tensor: {shape}"
+    elif isinstance(nested_structure, np.ndarray):
+        shape = tuple(nested_structure.shape)
+        return f"numpy: {shape}"
     elif isinstance(nested_structure, bytes):
         return f"bytes: {len(nested_structure)}"
     elif isinstance(nested_structure, dict):
@@ -19,9 +23,13 @@ def extract_shapes(nested_structure):
         return nested_structure  # 其他类型直接返回
 
 
-def tensor_hash(tensor):
-    """计算张量的哈希值"""
-    return hashlib.sha256(tensor.cpu().numpy().tobytes()).hexdigest()
+def tensor_hash(x):
+    if isinstance(x, torch.Tensor):
+        return hashlib.sha256(x.cpu().numpy().tobytes()).hexdigest()
+    elif isinstance(x, np.ndarray):
+        return hashlib.sha256(x.tobytes()).hexdigest()
+    else:
+        raise ValueError(f"Unsupported type: {type(x)}")
 
 
 def debug_sequential(
