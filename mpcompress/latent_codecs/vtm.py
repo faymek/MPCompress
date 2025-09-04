@@ -246,12 +246,10 @@ class VtmCodec:
             f"--InternalBitDepth={bitdepth} --InputBitDepth={bitdepth} "
             f"--InputChromaFormat={chroma_format} --OutputBitDepth={bitdepth} "
         )
-        print(cmd)
         run_shell(cmd)
 
     def decompress(self, bin_path, rec_path, bit_depth=8):
         cmd = f"{self.decoder_path} -b {bin_path} -o {rec_path} -d {bit_depth}"
-        print(cmd)
         run_shell(cmd)
 
 
@@ -340,7 +338,6 @@ class VtmFeatureCodec:
     ):
         # expected feature: (N_crop, N_layer, H*W+1, C)
         cfg = self.cfg
-        print(org_feat.shape)
 
         # Truncation
         if cfg.trun_flag is True:
