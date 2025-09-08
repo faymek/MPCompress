@@ -16,13 +16,23 @@ from compressai.layers import (
     CheckerboardMaskedConv2d,
     sequential_channel_ramp,
 )
-from compressai.registry import register_model
+from compressai.registry import register_model, register_module
 
 from compressai.models.base import CompressionModel
 from compressai.models.utils import conv, deconv
 from einops import rearrange
 
 from mpcompress.layers.vit import Block
+
+
+@register_module("ChannelGroupsLatentCodecContiguous")
+class ChannelGroupsLatentCodecContiguous(ChannelGroupsLatentCodec):
+    # monkey patch to make the ch ctx params consistent within compress and decompress
+    def merge_y(self, *args):
+        return torch.cat(args, dim=1).contiguous()
+
+    def merge_params(self, *args):
+        return torch.cat(args, dim=1).contiguous()
 
 
 @register_model("VitUnionLatentCodec")
@@ -136,7 +146,7 @@ class VitUnionLatentCodec(CompressionModel):
         }
 
         # Channel groups with space-channel context model (SCCTX):
-        self.y_lc = ChannelGroupsLatentCodec(
+        self.y_lc = ChannelGroupsLatentCodecContiguous(
             groups=self.groups,
             channel_context=channel_context,
             latent_codec=scctx_latent_codec,
@@ -191,7 +201,7 @@ class VitUnionLatentCodec(CompressionModel):
         y_out = self.y_lc.decompress(y_strings_, shape["y"], hyper_out["params"])
         h_hat = self.f_s(y_out["y_hat"])
         _h_hat = rearrange(h_hat, "B C H W -> B (H W) C")
-        _h_hat = torch.cat([self.post_reg_tokens.expand(1, -1, -1), _h_hat], dim=1)
+        _h_hat = torch.cat([self.post_reg_tokens.expand(1, -1, -1), _h_hat], dim=1).contiguous()
         h_hat = self.post_vit_blocks(_h_hat)
         return {"h_hat": h_hat}
 
@@ -307,7 +317,7 @@ class VitSeparateLatentCodec(CompressionModel):
         }
 
         # Channel groups with space-channel context model (SCCTX):
-        self.y_lc = ChannelGroupsLatentCodec(
+        self.y_lc = ChannelGroupsLatentCodecContiguous(
             groups=self.groups,
             channel_context=channel_context,
             latent_codec=scctx_latent_codec,
@@ -556,7 +566,7 @@ class VitUnionLatentCodecWithCtx(CompressionModel):
         }
 
         # Channel groups with space-channel context model (SCCTX):
-        self.y_lc = ChannelGroupsLatentCodec(
+        self.y_lc = ChannelGroupsLatentCodecContiguous(
             groups=self.groups,
             channel_context=channel_context,
             latent_codec=scctx_latent_codec,
@@ -751,7 +761,7 @@ class VitUnionLatentCodecCtxAsHyper(CompressionModel):
         }
 
         # Channel groups with space-channel context model (SCCTX):
-        self.y_lc = ChannelGroupsLatentCodec(
+        self.y_lc = ChannelGroupsLatentCodecContiguous(
             groups=self.groups,
             channel_context=channel_context,
             latent_codec=scctx_latent_codec,
