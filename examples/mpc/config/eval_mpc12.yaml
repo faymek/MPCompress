@@ -1,7 +1,4 @@
 multi_run:
-  q0300:
-    load:
-      path: /home/faymek/MPCompress/exp/MPC12-EmD48G3/Q3.0/runner.best.pth.tar
   q0600:
     load:
       path: /home/faymek/MPCompress/exp/MPC12-EmD48G3/Q6.0/runner.best.pth.tar
@@ -19,19 +16,6 @@ load:
   path: /home/faymek/MPCompress/exp/MPC12-EmD48G3/Q3.0/runner.best.pth.tar
   strict: true
   rules: # type, pattern, replacement
-    - ["startswith", "dino.feature_model", "dino.model"]
-    - ["startswith", "vqgan.", "vqgan.vqgan."]
-    - ["startswith", "mp12_enc.", "dino_codec.cond_enc."]
-    - ["startswith", "dec1.", "cond_dec_for_vqgan."]
-    - ["startswith", "dec2.", "dino_codec.cond_dec."]
-    - ["startswith", "f_a.", "dino_codec.f_a."]
-    - ["startswith", "f_s.", "dino_codec.f_s."]
-    - ["startswith", "vqgan_down.", "dino_codec.f_ctx_down."]
-    - ["startswith", "latent_codec.hyper.", "dino_codec.hyper_lc."]
-    - ["startswith", "latent_codec.y.", "dino_codec.y_lc."]
-    - ["startswith", "post_reg_tokens", "dino_codec.post_reg_tokens"]
-    - ["startswith", "pre_vit_blocks.", "dino_codec.pre_vit_blocks."]
-    - ["startswith", "post_vit_blocks.", "dino_codec.post_vit_blocks."]
 
 model: 
   type: MPC_I12
@@ -58,7 +42,7 @@ model:
 
   dino_backbone:
     model_size: small
-    img_size: 256
+    img_size: 512
     patch_size: 16
     dynamic_size: true
     slot: -4

@@ -1,39 +1,38 @@
 multi_run:
-  q0300:
+  q003:
     load:
-      path: /home/faymek/MPCompress/exp/MPC2-new/Q3.0/runner.best.pth.tar
-  q0600:
+      path: /home/faymek/MPCompress/exp/MPC2-v2/Q3.0/runner.best.pth.tar
+  q006:
     load:
-      path: /home/faymek/MPCompress/exp/MPC2-new/Q6.0/runner.best.pth.tar
-  q1200:
+      path: /home/faymek/MPCompress/exp/MPC2-v2/Q6.0/runner.best.pth.tar
+  q012:
     load:
-      path: /home/faymek/MPCompress/exp/MPC2-new/Q12.0/runner.best.pth.tar
-  q2400:
+      path: /home/faymek/MPCompress/exp/MPC2-v2/Q12.0/runner.best.pth.tar
+  q024:
     load:
-      path: /home/faymek/MPCompress/exp/MPC2-new/Q24.0/runner.best.pth.tar
-  q4800:
+      path: /home/faymek/MPCompress/exp/MPC2-v2/Q24.0/runner.best.pth.tar
+  q048:
     load:
-      path: /home/faymek/MPCompress/exp/MPC2-new/Q48.0/runner.best.pth.tar
+      path: /home/faymek/MPCompress/exp/MPC2-v2/Q48.0/runner.best.pth.tar
+  q096:
+    load:
+      path: /home/faymek/MPCompress/exp/MPC2-v2/Q96.0/runner.best.pth.tar
+  q192:
+    load:
+      path: /home/faymek/MPCompress/exp/MPC2-v2/Q192.0/runner.best.pth.tar
+
 
 load:
-  path: /home/faymek/MPCompress/exp/MPC2-new/Q3.0/runner.best.pth.tar
+  path: /home/faymek/MPCompress/exp/MPC2-v2/Q3.0/runner.best.pth.tar
   strict: true
   rules: # type, pattern, replacement
-    - ["startswith", "dino.feature_model", "dino.model"]
-    - ["startswith", "post_reg_tokens", "dino_codec.post_reg_tokens"]
-    - ["startswith", "pre_vit_blocks.", "dino_codec.pre_vit_blocks."]
-    - ["startswith", "post_vit_blocks.", "dino_codec.post_vit_blocks."]
-    - ["startswith", "f_a.", "dino_codec.f_a."]
-    - ["startswith", "f_s.", "dino_codec.f_s."]
-    - ["startswith", "latent_codec.hyper.", "dino_codec.hyper_lc."]
-    - ["startswith", "latent_codec.y.", "dino_codec.y_lc."]
 
 model: 
   type: MPC_I2
   
   dino_backbone:
     model_size: small
-    img_size: 256
+    img_size: 512
     patch_size: 16
     dynamic_size: true
     slot: -4
