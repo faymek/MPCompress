@@ -539,9 +539,9 @@ class VitUnionLatentCodecWithCtx(CompressionModel):
             f"y{k}": nn.Sequential(
                 conv(sum(self.groups[:k]), z_dim, kernel_size=5, stride=1),
                 nn.ReLU(inplace=True),
-                conv(192, 192, kernel_size=5, stride=1),
+                conv(z_dim, z_dim, kernel_size=5, stride=1),
                 nn.ReLU(inplace=True),
-                conv(192, self.groups[k] * 2, kernel_size=5, stride=1),
+                conv(z_dim, self.groups[k] * 2, kernel_size=5, stride=1),
             )
             for k in range(1, len(self.groups))
         }
@@ -734,9 +734,9 @@ class VitUnionLatentCodecCtxAsHyper(CompressionModel):
             f"y{k}": nn.Sequential(
                 conv(sum(self.groups[:k]), z_dim, kernel_size=5, stride=1),
                 nn.ReLU(inplace=True),
-                conv(192, 192, kernel_size=5, stride=1),
+                conv(z_dim, z_dim, kernel_size=5, stride=1),
                 nn.ReLU(inplace=True),
-                conv(192, self.groups[k] * 2, kernel_size=5, stride=1),
+                conv(z_dim, self.groups[k] * 2, kernel_size=5, stride=1),
             )
             for k in range(1, len(self.groups))
         }
