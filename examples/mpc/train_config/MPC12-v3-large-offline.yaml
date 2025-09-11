@@ -1,0 +1,121 @@
+# MPC12-v2 config, same arch as MPC12-v1-EmD48G3
+# but using the refactored code
+
+exp:
+  name: MPC12-v3-large-offline
+  quality: "12.0"
+
+model: 
+  type: MPC_I12
+
+  vqgan_backbone:
+    ckpt_path: /home/faymek/Models/kmeans_tune/16384_kmeans_1024_epoch/epoch1/checkpoints/last.ckpt
+    n_embed: 1024
+    embed_dim: 256
+    ddconfig:
+      double_z: false
+      z_channels: 256
+      resolution: 256
+      in_channels: 3
+      out_ch: 3
+      ch: 128
+      ch_mult: [1, 1, 2, 2, 4]
+      num_res_blocks: 2
+      attn_resolutions:
+      - 16
+      dropout: 0.0
+
+  vqgan_codec:
+    type: UniformTokenCodec
+    alphabet_size: 1024
+
+  dino_backbone:
+    model_size: large
+    img_size: 512
+    patch_size: 16
+    dynamic_size: true
+    slot: -3
+    n_last_blocks: 4
+
+  dino_codec:
+    h_dim: 1024
+    y_dim: 48
+    z_dim: 192
+    ctx_dim: 256
+    groups: 16
+
+load:
+  path:
+  strict: false
+  rename:
+  rules:
+
+tune:
+  main_optimizer:
+    - "!*.quantiles"  # 排除以.quantiles结尾的
+    - "!dino.*"  # 排除以dino.开头的
+    - "!vqgan.*"  # 排除以vqgan.开头的
+
+  aux_optimizer:
+    - "*.quantiles"
+
+misc:
+  epochs: 64
+  batch_size: 16
+  test_batch_size: 1
+  num_workers: 16
+  clip_max_norm: 1.0
+  check: false
+  visual: true
+  resume: false
+  offline: true
+
+main_scheduler:
+  type: torch.optim.lr_scheduler.StepLR
+  step_size: 18
+  gamma: 0.1
+
+train_dataset:
+  type: FeatureDictFolder
+  root: /home/faymek/MPCompress/data/dataset/FD-large
+  split: train
+
+val_dataset:
+  type: FeatureDictFolder
+  root: /home/faymek/MPCompress/data/dataset/FD-large
+  split: test
+
+train_transforms:
+  type: Compose
+  transforms:
+    - type: RandomCrop
+      size: 512
+      pad_if_needed: true
+    - type: ToTensor
+
+val_transforms:
+  type: Compose
+  transforms:
+    - type: CenterCrop
+      size: 512
+    - type: ToTensor
+
+criterion:
+  type: MPC12Loss
+  rlmbda: 12.0
+
+main_optimizer:
+  type: torch.optim.Adam
+  lr: 1e-4
+
+aux_optimizer:
+  type: torch.optim.Adam
+  lr: 1e-3
+
+engine:
+  cuda: true
+  save: true
+  seed: 42
+  deterministic: false
+  cudnn_benchmark: true
+  
