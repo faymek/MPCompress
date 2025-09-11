@@ -76,6 +76,13 @@ class MPC_I2(CompressionModel):
             "likelihoods": dino_out["likelihoods"],
         }
 
+    def extract_feature(self, x, **kwargs):  # for training
+        with torch.inference_mode():
+            h_dino = self.dino.encode(x)
+            return {
+                "h_dino": h_dino,
+            }
+
     def forward_test(self, x, return_cls=False, return_seg=False, **kwargs):
         with torch.inference_mode():
             results = {}
@@ -200,6 +207,16 @@ class MPC_I12(CompressionModel):
             "likelihoods": dino_out["likelihoods"],
             "x_hat": x_hat,
         }
+
+    def extract_feature(self, x, **kwargs):  # for training
+        with torch.inference_mode():
+            vqgan_enc = self.vqgan.encode(x)
+            h_dino = self.dino.encode(x)
+            return {
+                "tokens": vqgan_enc["tokens"],
+                "h_dino": h_dino,
+            }
+
 
     def forward_test(
         self,
