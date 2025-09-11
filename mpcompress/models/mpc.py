@@ -83,6 +83,27 @@ class MPC_I2(CompressionModel):
                 "h_dino": h_dino,
             }
 
+    def offline_forward(self, data, device, **kwargs):  # for lic training
+        with torch.inference_mode():
+            h_dino = data["h_dino"].to(device).float()
+            tokens = data["tokens"].to(device)
+            token_res = (
+                tokens.shape[-2],
+                tokens.shape[-1],
+            )
+            o_dino = self.dino.decode_whole(h_dino, token_res)[-1]
+
+        h_dino = h_dino.clone()
+        dino_out = self.dino_codec(h_dino, token_res)
+        h_dino_hat = dino_out["h_hat"]
+        o_dino_hat = self.dino.decode_whole(h_dino_hat)[-1]
+
+        return {
+            "h_dino_hat": o_dino_hat,
+            "h_dino": o_dino.clone(),
+            "likelihoods": dino_out["likelihoods"],
+        }
+
     def forward_test(self, x, return_cls=False, return_seg=False, **kwargs):
         with torch.inference_mode():
             results = {}
@@ -217,6 +238,43 @@ class MPC_I12(CompressionModel):
                 "h_dino": h_dino,
             }
 
+    def offline_forward(self, data, device, **kwargs):  # for training
+        with torch.inference_mode():
+
+            h_dino = data["h_dino"].to(device)
+            tokens = data["tokens"].to(device)
+
+            token_res = (
+                tokens.shape[-2],
+                tokens.shape[-1],
+            )
+            o_dino = self.dino.decode_whole(h_dino, token_res)[-1]
+
+        h_dino = h_dino.clone()
+        h_vqgan_ctx = self.vqgan.tokens_to_features(tokens.clone())
+
+        dino_out = self.dino_codec(h_dino, h_vqgan_ctx, token_res)
+        h_dino_hat = dino_out["h_hat"]
+        o_dino_hat = self.dino.decode_whole(h_dino_hat)[-1]
+
+        h_hat_for_vqgan = self.cond_dec_for_vqgan(
+            torch.cat([dino_out["h_hat_share"].detach(), h_vqgan_ctx], dim=1)
+        )
+
+        if not self.training:
+            with torch.no_grad():
+                x_hat = self.vqgan.decode(h_hat_for_vqgan)
+        else:
+            x_hat = None
+
+        return {
+            "h_vqgan": h_vqgan_ctx.clone(),
+            "h_vqgan_hat": h_hat_for_vqgan,
+            "h_dino": o_dino.clone(),
+            "h_dino_hat": o_dino_hat,
+            "likelihoods": dino_out["likelihoods"],
+            "x_hat": x_hat,
+        }
 
     def forward_test(
         self,
