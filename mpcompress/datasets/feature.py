@@ -28,14 +28,14 @@
 # ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 from pathlib import Path
-
+import os
 from PIL import Image
 from torch.utils.data import Dataset
 
 from compressai.registry import register_dataset
 
-import numpy as np 
-
+import numpy as np
+import torch
 
 
 @register_dataset("FeatureFolder")
@@ -60,7 +60,21 @@ class FeatureFolder(Dataset):
         split (string): split mode ('train' or 'val')
     """
 
-    def __init__(self, root, transform=None, split="train", model_type="sd3", task="tti", trun_flag=False, trun_low=-20, trun_high=20, quant_type="uniform", qsamples=0, bit_depth=1, patch_size=(512, 512)):
+    def __init__(
+        self,
+        root,
+        transform=None,
+        split="train",
+        model_type="sd3",
+        task="tti",
+        trun_flag=False,
+        trun_low=-20,
+        trun_high=20,
+        quant_type="uniform",
+        qsamples=0,
+        bit_depth=1,
+        patch_size=(512, 512),
+    ):
         # splitdir = Path(root) / split
         splitdir = Path(root)
 
@@ -68,12 +82,12 @@ class FeatureFolder(Dataset):
             raise RuntimeError(f'Missing directory "{splitdir}"')
 
         self.samples = sorted(f for f in splitdir.iterdir() if f.is_file())
-        #gcs
+        # gcs
         # self.samples = self.samples[:100]
 
         self.transform = transform
 
-        #gcs
+        # gcs
         self.model_type = model_type
         self.task = task
         self.trun_flag = trun_flag
@@ -82,7 +96,7 @@ class FeatureFolder(Dataset):
         self.quant_type = quant_type
         self.qsamples = qsamples
         self.bit_depth = bit_depth
-        self.patch_size = patch_size    #(height, width), must be the multiple of 64
+        self.patch_size = patch_size  # (height, width), must be the multiple of 64
 
     def __getitem__(self, index):
         """
@@ -94,27 +108,34 @@ class FeatureFolder(Dataset):
         """
         # Load feature, use float32 for training
         feat = np.load(self.samples[index]).astype(np.float32)
-        #gcs, preprocessing
-        if self.trun_flag == True: feat = FeatureFolder.truncation(feat, self.trun_low, self.trun_high)
-        feat = FeatureFolder.uniform_quantization(feat, self.trun_low, self.trun_high, self.bit_depth)
+        # gcs, preprocessing
+        if self.trun_flag == True:
+            feat = FeatureFolder.truncation(feat, self.trun_low, self.trun_high)
+        feat = FeatureFolder.uniform_quantization(
+            feat, self.trun_low, self.trun_high, self.bit_depth
+        )
         feat = FeatureFolder.packing(feat, self.model_type)
-        feat = FeatureFolder.random_crop(feat, self.patch_size)   # (height, width), must be the multiple of 64
-        feat = np.expand_dims(feat, axis=0) # (C,H,W)
+        feat = FeatureFolder.random_crop(
+            feat, self.patch_size
+        )  # (height, width), must be the multiple of 64
+        feat = np.expand_dims(feat, axis=0)  # (C,H,W)
         # print(feat.shape)
         return feat
 
     def __len__(self):
         return len(self.samples)
-    
+
     @staticmethod
     def truncation(feat, trun_low, trun_high):
         trun_feat = np.zeros_like(feat).astype(np.float32)
         if isinstance(trun_low, list):
             for idx in range(len(trun_low)):
-                trun_feat[:,idx,:,:] = np.clip(feat[:,idx,:,:], trun_low[idx], trun_high[idx])
+                trun_feat[:, idx, :, :] = np.clip(
+                    feat[:, idx, :, :], trun_low[idx], trun_high[idx]
+                )
         else:
             trun_feat = np.clip(feat, trun_low, trun_high)
-        
+
         return trun_feat
 
     @staticmethod
@@ -122,11 +143,11 @@ class FeatureFolder(Dataset):
         quant_feat = np.zeros_like(feat).astype(np.float32)
         if isinstance(min_v, list):
             for idx in range(len(min_v)):
-                scale = ((2**bit_depth) -1) / (max_v[idx] - min_v[idx])
-                quant_feat[:,idx,:,:] = ((feat[:,idx,:,:]-min_v[idx]) * scale)
+                scale = ((2**bit_depth) - 1) / (max_v[idx] - min_v[idx])
+                quant_feat[:, idx, :, :] = (feat[:, idx, :, :] - min_v[idx]) * scale
         else:
-            scale = ((2**bit_depth) -1) / (max_v - min_v)
-            quant_feat = ((feat-min_v) * scale)
+            scale = ((2**bit_depth) - 1) / (max_v - min_v)
+            quant_feat = (feat - min_v) * scale
 
         return quant_feat
 
@@ -136,40 +157,49 @@ class FeatureFolder(Dataset):
         dequant_feat = np.zeros_like(feat).astype(np.float32)
         if isinstance(min_v, list):
             for idx in range(len(min_v)):
-                scale = ((2**bit_depth) -1) / (max_v[idx] - min_v[idx])
-                dequant_feat[:,idx,:,:] = feat[:,idx,:,:] / scale + min_v[idx]
+                scale = ((2**bit_depth) - 1) / (max_v[idx] - min_v[idx])
+                dequant_feat[:, idx, :, :] = feat[:, idx, :, :] / scale + min_v[idx]
         else:
-            scale = ((2**bit_depth) -1) / (max_v - min_v)
+            scale = ((2**bit_depth) - 1) / (max_v - min_v)
             dequant_feat = feat / scale + min_v
         return dequant_feat
 
     @staticmethod
     def packing(feat, model_type):
         N, C, H, W = feat.shape
-        if model_type == 'llama3':
-            feat = feat[0,0,:,:]
-        elif model_type == 'dinov2':
-            feat = feat.transpose(0,2,1,3).reshape(N*H,C*W)
-        elif model_type == 'sd3':
-            feat = feat.reshape(int(C/4), int(C/4), H, W).transpose(0, 2, 1, 3).reshape(int(C/4*H), int(C/4*W)) 
+        if model_type == "llama3":
+            feat = feat[0, 0, :, :]
+        elif model_type == "dinov2":
+            feat = feat.transpose(0, 2, 1, 3).reshape(N * H, C * W)
+        elif model_type == "sd3":
+            feat = (
+                feat.reshape(int(C / 4), int(C / 4), H, W)
+                .transpose(0, 2, 1, 3)
+                .reshape(int(C / 4 * H), int(C / 4 * W))
+            )
         return feat
 
     @staticmethod
     def unpacking(feat, shape, model_type):
         N, C, H, W = shape
-        if model_type == 'llama3':
-            feat = np.expand_dims(feat, axis=0); feat = np.expand_dims(feat, axis=0)
-        elif model_type == 'dinov2':
-            feat = feat.reshape(N,H,C,W).transpose(0, 2, 1, 3) 
-        elif model_type == 'sd3':
-            feat = feat.reshape(int(C/4), H, int(C/4), W).transpose(0,2,1,3).reshape(N,C,H,W)
+        if model_type == "llama3":
+            feat = np.expand_dims(feat, axis=0)
+            feat = np.expand_dims(feat, axis=0)
+        elif model_type == "dinov2":
+            feat = feat.reshape(N, H, C, W).transpose(0, 2, 1, 3)
+        elif model_type == "sd3":
+            feat = (
+                feat.reshape(int(C / 4), H, int(C / 4), W)
+                .transpose(0, 2, 1, 3)
+                .reshape(N, C, H, W)
+            )
         return feat
 
     @staticmethod
-    def random_crop(feat, crop_shape): # (hight, width)
+    def random_crop(feat, crop_shape):  # (hight, width)
         max_row = feat.shape[0] - crop_shape[0]
         max_col = feat.shape[1] - crop_shape[1]
-        
+
         if max_row < 0 or max_col < 0:
             print(feat.shape[0], crop_shape[0])
             print(feat.shape[1], crop_shape[1])
@@ -177,8 +207,96 @@ class FeatureFolder(Dataset):
 
         start_row = np.random.randint(0, max_row + 1)
         start_col = np.random.randint(0, max_col + 1)
-        
+
         end_row = start_row + crop_shape[0]
         end_col = start_col + crop_shape[1]
-        
+
         return feat[start_row:end_row, start_col:end_col]
+
+
+class FeatureDictFolder(Dataset):
+    def __init__(self, root, transform=None, split="train"):
+        splitdir = Path(root) / split
+
+        if not splitdir.is_dir():
+            raise RuntimeError(f'Missing directory "{splitdir}"')
+
+        self.samples = sorted(f for f in splitdir.rglob("*.pt") if f.is_file())
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        file = self.samples[idx]
+        with open(file, "rb") as f:
+            data = torch.load(f, map_location="cpu", weights_only=True)
+        data["tokens"] = data["tokens"].long()
+        data["h_dino"] = data["h_dino"].float()
+        data["token_res"] = (32, 32)
+        return data
+
+
+class FeatureDictPerKeyFolder(Dataset):
+    """
+    save each key in a separate folder, only retrieve the data of the specified keys, reduce disk IO usage
+    """
+
+    def __init__(self, root, split="", keys=None, transform=None):
+        root = os.path.join(root, split)
+        self.root = root
+        self.transform = transform
+        all_keys = os.listdir(root)
+        self.keys = keys if keys is not None else all_keys
+
+        self.samples = {key: [] for key in self.keys}
+        for key in self.keys:
+            self.samples[key] = [
+                os.path.join(root, key, f) for f in os.listdir(os.path.join(root, key))
+            ]
+
+        key_lengths = {key: len(self.samples[key]) for key in self.keys}
+        assert len(set(key_lengths.values())) == 1, "所有键的长度必须相同"
+        self.length = len(self.samples[self.keys[0]])
+
+        print(f"数据集加载成功，共 {self.length} 个样本")
+        print(f"包含的键: {self.keys}")
+
+    def __len__(self):
+        """返回数据集大小"""
+        return self.length
+
+    def __getitem__(self, idx):
+        data = {}
+        for key in self.keys:
+            with open(self.samples[key][idx], "rb") as f:
+                value = torch.load(f, map_location="cpu", weights_only=True)
+            if key == "tokens":
+                data[key] = value.long()
+            elif key == "h_dino":
+                data[key] = value.float()
+            else:
+                data[key] = value
+        data["token_res"] = (32, 32)
+        if "x_uint8" not in self.keys:
+            data["x_uint8"] = torch.zeros(3, 512, 512, dtype=torch.uint8)
+
+        if self.transform:
+            data = self.transform(data)
+
+        return data
+
+
+def feature_dict_collate_fn(batch):
+    """
+    自定义collate函数，将多个feature合并成一个大的batch
+    """
+    collated = {}
+    first = batch[0]
+    for key in first.keys():
+        values = [item[key] for item in batch]
+        if isinstance(values[0], torch.Tensor):
+            collated[key] = torch.stack(values, dim=0)
+        else:
+            collated[key] = values[0]
+
+    return collated
