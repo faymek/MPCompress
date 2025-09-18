@@ -85,7 +85,13 @@ class MPC_I2(CompressionModel):
 
     def offline_forward(self, data, device, **kwargs):  # for lic training
         with torch.inference_mode():
-            h_dino = data["h_dino"].to(device).float()
+            h_dino = data["h_dino"].to(device)
+
+            # x_uint8 = data["x_uint8"].to(device)
+            # x = x_uint8 / 255.0
+            # h_dino_ref = self.dino.encode(x).to(torch.float16).float()
+            # assert torch.allclose(h_dino, h_dino_ref), "not consistent"
+
             tokens = data["tokens"].to(device)
             token_res = (
                 tokens.shape[-2],
@@ -230,6 +236,7 @@ class MPC_I12(CompressionModel):
         }
 
     def extract_feature(self, x, **kwargs):  # for training
+        x = x.clone().contiguous()
         with torch.inference_mode():
             vqgan_enc = self.vqgan.encode(x)
             h_dino = self.dino.encode(x)
@@ -243,6 +250,11 @@ class MPC_I12(CompressionModel):
 
             h_dino = data["h_dino"].to(device)
             tokens = data["tokens"].to(device)
+
+            # x_uint8 = data["x_uint8"].to(device)
+            # x = x_uint8 / 255.0
+            # h_dino_ref = self.dino.encode(x).to(torch.float16).float()
+            # assert torch.allclose(h_dino, h_dino_ref)
 
             token_res = (
                 tokens.shape[-2],

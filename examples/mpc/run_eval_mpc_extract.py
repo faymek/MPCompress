@@ -38,14 +38,15 @@ from mpcompress.metrics.iqa_metrics import create_img_metrics, create_dist_metri
 from mpcompress.utils.tensor_ops import tensor2image, center_pad, center_crop
 from mpcompress.utils.utils import rename_key_by_rules
 from mpcompress.utils.debug import extract_shapes
-
+from mpcompress.utils.debug import tensor_hash
 
 # Disable Warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-torch.backends.cudnn.deterministic = True
-torch.set_num_threads(1)
+# comment this to keep same behaviour as training
+# torch.backends.cudnn.deterministic = True
+# torch.set_num_threads(1)
 
 
 def get_obj_from_str(string, reload=False):
@@ -89,7 +90,7 @@ def instantiate_transforms(config, **kwargs):
 def eval_model(cfg):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = instantiate_class(cfg.model).to(device)
-    model.eval()
+    # model.eval()
 
     train_transforms = Compose([
         RandomCrop(512, pad_if_needed=True),
@@ -100,28 +101,33 @@ def eval_model(cfg):
     train_dataset = instantiate_class(cfg.train_dataset, transform=train_transforms)
     train_dataloader = DataLoader(
         train_dataset,
-        batch_size=cfg.misc.batch_size,
+        batch_size=1,
         num_workers=cfg.misc.num_workers,
-        shuffle=True,
+        shuffle=False,
         pin_memory=False,
     )
 
     # 创建输出目录
     os.makedirs("extract", exist_ok=True)
-    
+    os.makedirs("extract/train", exist_ok=True)
+    os.makedirs("extract/test", exist_ok=True)
+
     pbar = tqdm(train_dataloader)
     for i, data in enumerate(pbar):
-        if i >= 400800:
-            break
-        data = data.to(device)
-        x = data / 255.0
-        res = model.extract_feature(x)
-        reduce_pt = {
-            "tokens": res["tokens"][0].to(torch.int16),
-            "h_dino": res["h_dino"][0].to(torch.float16),
-            "x_uint8": data[0],
+        x_uint8 = data.to(device)
+        x = x_uint8 / 255.0
+        return_data = model.extract_feature(x)
+        write_data = {
+            "tokens": return_data["tokens"][0].to(torch.int16),
+            "h_dino": return_data["h_dino"][0].to(torch.float16),
+            "x_uint8": x_uint8[0],
         }
-        torch.save(reduce_pt, f"extract/{i:08d}.pt")
+        if i < 400000:
+            torch.save(write_data, f"extract/train/{i:08d}.pt")
+        elif i < 400400:
+            torch.save(write_data, f"extract/test/{i:08d}.pt")
+        else:
+            break
 
 
 def setup_args():
