@@ -222,7 +222,7 @@ def eval_model(cfg):
     for x, img_meta in tqdm.tqdm(dataset):
         x = ToTensor()(x).to(device)
         x = x.unsqueeze(0) if x.dim() == 3 else x
-        x_padded, padding = center_pad(x, 128)
+        x_padded, padding = center_pad(x, 64)
 
         time_items, bits_items, out_net = inference_x(
             model,

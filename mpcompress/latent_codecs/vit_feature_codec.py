@@ -23,6 +23,7 @@ from compressai.models.utils import conv, deconv
 from einops import rearrange
 
 from mpcompress.layers.vit import Block
+from mpcompress.utils.tensor_ops import center_pad, border_pad
 
 
 @register_module("ChannelGroupsLatentCodecContiguous")
@@ -186,22 +187,36 @@ class VitUnionLatentCodec(CompressionModel):
         h = self.pre_vit_blocks(h)[:, 1:].contiguous()
         h = rearrange(h, "B (H W) C -> B C H W", H=token_res[0], W=token_res[1])
         y = self.f_a(h)
-        hyper_out = self.hyper_lc.compress(y)
-        y_out = self.y_lc.compress(y, hyper_out["params"])
+        # x --16-> h --2-> y --4-> z
+        # if pad 32 for y, y is not compatible with checkerboard codec
+        # so we pad 64 for y, then only need to pad 2 for z
+        y_pad = border_pad(y, 2)
+        hyper_out = self.hyper_lc.compress(y_pad)
+        _, _, y_H, y_W = y.shape
+        y_out = self.y_lc.compress(y, hyper_out["params"][:, :, :y_H, :y_W])
 
         return {
             "strings": {"y": y_out["strings"], "z": hyper_out["strings"]},
-            "shape": {"y": y_out["shape"], "z": hyper_out["shape"]},
+            "shape": {
+                "y": y_out["shape"],
+                "z": hyper_out["shape"],
+                "y_pad": (y_H, y_W),
+            },
         }
 
     def decompress(self, strings, shape, **kwargs):
         y_strings_ = strings["y"]
         z_strings_ = strings["z"]
         hyper_out = self.hyper_lc.decompress(z_strings_, shape["z"])
-        y_out = self.y_lc.decompress(y_strings_, shape["y"], hyper_out["params"])
+        y_H, y_W = shape["y_pad"]
+        y_out = self.y_lc.decompress(
+            y_strings_, shape["y"], hyper_out["params"][:, :, :y_H, :y_W]
+        )
         h_hat = self.f_s(y_out["y_hat"])
         _h_hat = rearrange(h_hat, "B C H W -> B (H W) C")
-        _h_hat = torch.cat([self.post_reg_tokens.expand(1, -1, -1), _h_hat], dim=1).contiguous()
+        _h_hat = torch.cat(
+            [self.post_reg_tokens.expand(1, -1, -1), _h_hat], dim=1
+        ).contiguous()
         h_hat = self.post_vit_blocks(_h_hat)
         return {"h_hat": h_hat}
 
@@ -381,8 +396,13 @@ class VitSeparateLatentCodec(CompressionModel):
             h_patch, "B (H W) C -> B C H W", H=token_res[0], W=token_res[1]
         )
         y = self.f_a(h_patch)
-        hyper_out = self.hyper_lc.compress(y)
-        y_out = self.y_lc.compress(y, hyper_out["params"])
+        # x --16-> h --2-> y --4-> z
+        # if pad 32 for y, y is not compatible with checkerboard codec
+        # so we pad 64 for y, then only need to pad 2 for z
+        y_pad = border_pad(y, 2)
+        hyper_out = self.hyper_lc.compress(y_pad)
+        _, _, y_H, y_W = y.shape
+        y_out = self.y_lc.compress(y, hyper_out["params"][:, :, :y_H, :y_W])
 
         return {
             "strings": {
@@ -394,6 +414,7 @@ class VitSeparateLatentCodec(CompressionModel):
                 "cls": cls_out["shape"],
                 "y": y_out["shape"],
                 "z": hyper_out["shape"],
+                "y_pad": (y_H, y_W),
             },
         }
 
@@ -402,8 +423,11 @@ class VitSeparateLatentCodec(CompressionModel):
         h_cls_hat = cls_out["params"]
         h_cls_hat = rearrange(h_cls_hat, "B C 1 1 -> B 1 C")
 
+        y_H, y_W = shape["y_pad"]
         hyper_out = self.hyper_lc.decompress(strings["z"], shape["z"])
-        y_out = self.y_lc.decompress(strings["y"], shape["y"], hyper_out["params"])
+        y_out = self.y_lc.decompress(
+            strings["y"], shape["y"], hyper_out["params"][:, :, :y_H, :y_W]
+        )
         h_patch_hat = self.f_s(y_out["y_hat"])
         h_patch_hat = rearrange(h_patch_hat, "B C H W -> B (H W) C")
 
