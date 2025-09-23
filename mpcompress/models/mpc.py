@@ -12,6 +12,7 @@ from mpcompress.latent_codecs.vit_feature_codec import (
     VitSeparateLatentCodec,
     VitUnionLatentCodecWithCtx,
     VitUnionLatentCodecCtxAsHyper,
+    VbrVitUnionLatentCodec
 )
 
 
@@ -56,7 +57,7 @@ class MPC_I2(CompressionModel):
         self.dino_codec = VitUnionLatentCodec(**dino_codec)
         self.patch_size = self.dino.patch_size
 
-    def forward(self, x, **kwargs):  # for lic training
+    def forward(self, x, qp=0, **kwargs):  # for lic training
         with torch.inference_mode():
             h_dino = self.dino.encode(x)
             token_res = (
@@ -66,7 +67,7 @@ class MPC_I2(CompressionModel):
             o_dino = self.dino.decode_whole(h_dino)[-1]
 
         h_dino = h_dino.clone()
-        dino_out = self.dino_codec(h_dino, token_res)
+        dino_out = self.dino_codec(h_dino, token_res, qp=qp)
         h_dino_hat = dino_out["h_hat"]
         o_dino_hat = self.dino.decode_whole(h_dino_hat)[-1]
 
@@ -83,7 +84,7 @@ class MPC_I2(CompressionModel):
                 "h_dino": h_dino,
             }
 
-    def offline_forward(self, data, device, **kwargs):  # for lic training
+    def offline_forward(self, data, device, qp=0, **kwargs):  # for lic training
         with torch.inference_mode():
             h_dino = data["h_dino"].to(device)
 
@@ -100,7 +101,7 @@ class MPC_I2(CompressionModel):
             o_dino = self.dino.decode_whole(h_dino, token_res)[-1]
 
         h_dino = h_dino.clone()
-        dino_out = self.dino_codec(h_dino, token_res)
+        dino_out = self.dino_codec(h_dino, token_res, qp=qp)
         h_dino_hat = dino_out["h_hat"]
         o_dino_hat = self.dino.decode_whole(h_dino_hat)[-1]
 
@@ -110,7 +111,7 @@ class MPC_I2(CompressionModel):
             "likelihoods": dino_out["likelihoods"],
         }
 
-    def forward_test(self, x, return_cls=False, return_seg=False, **kwargs):
+    def forward_test(self, x, qp=0, return_cls=False, return_seg=False, **kwargs):
         with torch.inference_mode():
             results = {}
             h_dino = self.dino.encode(x)
@@ -118,7 +119,7 @@ class MPC_I2(CompressionModel):
                 x.shape[2] // self.dino.patch_size,
                 x.shape[3] // self.dino.patch_size,
             )
-            dino_out = self.dino_codec(h_dino, token_res)
+            dino_out = self.dino_codec(h_dino, token_res, qp=qp)
             h_dino_hat = dino_out["h_hat"]
 
             if return_cls:
@@ -133,14 +134,15 @@ class MPC_I2(CompressionModel):
         h_dino = self.dino.encode(x)
         return h_dino.numel()
 
-    def compress(self, x, **kwargs):
+    def compress(self, x, qp=0, **kwargs):
         h_dino = self.dino.encode(x)
         token_res = (
             x.shape[2] // self.dino.patch_size,
             x.shape[3] // self.dino.patch_size,
         )
-        dino_out = self.dino_codec.compress(h_dino, token_res)
+        dino_out = self.dino_codec.compress(h_dino, token_res, qp=qp)
         dino_out["token_res"] = token_res
+        dino_out["qp"] = qp
         layered_out = {
             "ibranch2": dino_out,
         }
@@ -168,6 +170,19 @@ class MPC_I2_Separate(MPC_I2):
     ):
         super().__init__(dino_backbone, dino_codec, **kwargs)
         self.dino_codec = VitSeparateLatentCodec(**dino_codec)
+
+
+@register_model("MPC_I2_Vbr")
+class MPC_I2_Vbr(MPC_I2):
+    def __init__(
+        self,
+        dino_backbone={},
+        dino_codec={},
+        **kwargs,
+    ):
+        super().__init__(dino_backbone, dino_codec, **kwargs)
+        self.dino_codec = VbrVitUnionLatentCodec(**dino_codec)
+
 
 
 @register_model("MPC_I12")
