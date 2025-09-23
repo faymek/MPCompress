@@ -183,7 +183,7 @@ class VitUnionLatentCodec(CompressionModel):
             },
         }
 
-    def compress(self, h, token_res):
+    def compress(self, h, token_res, **kwargs):
         h = self.pre_vit_blocks(h)[:, 1:].contiguous()
         h = rearrange(h, "B (H W) C -> B C H W", H=token_res[0], W=token_res[1])
         y = self.f_a(h)
@@ -213,6 +213,204 @@ class VitUnionLatentCodec(CompressionModel):
             y_strings_, shape["y"], hyper_out["params"][:, :, :y_H, :y_W]
         )
         h_hat = self.f_s(y_out["y_hat"])
+        _h_hat = rearrange(h_hat, "B C H W -> B (H W) C")
+        _h_hat = torch.cat(
+            [self.post_reg_tokens.expand(1, -1, -1), _h_hat], dim=1
+        ).contiguous()
+        h_hat = self.post_vit_blocks(_h_hat)
+        return {"h_hat": h_hat}
+
+
+@register_model("VbrVitUnionLatentCodec")
+class VbrVitUnionLatentCodec(CompressionModel):
+    def __init__(
+        self,
+        h_dim=384,
+        y_dim=256,
+        z_dim=192,
+        groups=16,
+        **kwargs,
+    ):
+        super().__init__()
+        if isinstance(groups, list):
+            self.groups = groups
+        elif isinstance(groups, int):
+            self.groups = [groups] * (y_dim // groups)
+        assert sum(self.groups) == y_dim, "groups must sum to y_dim"
+
+        self.y_dim = y_dim
+        self.z_dim = z_dim
+
+        self.q_scale_enc = nn.Parameter(torch.ones((65, y_dim, 1, 1)))
+        self.q_scale_dec = nn.Parameter(torch.ones((65, y_dim, 1, 1)))
+        # https://github.com/microsoft/DCVC/blob/main/src/models/image_model.py
+
+        self.post_reg_tokens = nn.Parameter(torch.zeros(1, h_dim), requires_grad=True)
+        self.pre_vit_blocks = nn.Sequential(
+            *[Block(dim=h_dim, num_heads=h_dim // 64, mlp_ratio=4) for _ in range(2)]
+        )
+        self.post_vit_blocks = nn.Sequential(
+            *[Block(dim=h_dim, num_heads=h_dim // 64, mlp_ratio=4) for _ in range(2)]
+        )
+
+        self.f_a = nn.Sequential(
+            conv(h_dim, y_dim, kernel_size=3, stride=1),
+            nn.ReLU(inplace=True),
+            conv(y_dim, y_dim, kernel_size=5, stride=2),
+        )
+        self.f_s = nn.Sequential(
+            deconv(y_dim, y_dim, kernel_size=5, stride=2),
+            nn.ReLU(inplace=True),
+            deconv(y_dim, h_dim, kernel_size=3, stride=1),
+        )
+
+        h_a = nn.Sequential(
+            conv(y_dim, z_dim, kernel_size=3, stride=1),
+            nn.ReLU(inplace=True),
+            conv(z_dim, z_dim, kernel_size=5, stride=2),
+            nn.ReLU(inplace=True),
+            conv(z_dim, z_dim, kernel_size=5, stride=2),
+        )
+
+        h_s = nn.Sequential(
+            deconv(z_dim, z_dim, kernel_size=5, stride=2),
+            nn.ReLU(inplace=True),
+            deconv(z_dim, z_dim * 3 // 2, kernel_size=5, stride=2),
+            nn.ReLU(inplace=True),
+            deconv(z_dim * 3 // 2, z_dim * 2, kernel_size=3, stride=1),
+        )
+
+        # In [He2022], this is labeled "g_ch^(k)".
+        channel_context = {
+            f"y{k}": nn.Sequential(
+                conv(sum(self.groups[:k]), z_dim, kernel_size=5, stride=1),
+                nn.ReLU(inplace=True),
+                conv(z_dim, z_dim, kernel_size=5, stride=1),
+                nn.ReLU(inplace=True),
+                conv(z_dim, self.groups[k] * 2, kernel_size=5, stride=1),
+            )
+            for k in range(1, len(self.groups))
+        }
+
+        # In [He2022], this is labeled "g_sp^(k)".
+        spatial_context = [
+            CheckerboardMaskedConv2d(
+                self.groups[k],
+                self.groups[k] * 2,
+                kernel_size=5,
+                stride=1,
+                padding=2,
+            )
+            for k in range(len(self.groups))
+        ]
+
+        # In [He2022], this is labeled "Param Aggregation".
+        param_aggregation = [
+            sequential_channel_ramp(
+                # Input: spatial context, channel context, and hyper params.
+                self.groups[k] * 2 + (k > 0) * self.groups[k] * 2 + z_dim * 2,
+                self.groups[k] * 2,
+                min_ch=z_dim * 2,
+                num_layers=3,
+                interp="linear",
+                make_layer=nn.Conv2d,
+                make_act=lambda: nn.ReLU(inplace=True),
+                kernel_size=1,
+                stride=1,
+                padding=0,
+            )
+            for k in range(len(self.groups))
+        ]
+
+        # In [He2022], this is labeled the space-channel context model (SCCTX).
+        # The side params and channel context params are computed externally.
+        scctx_latent_codec = {
+            f"y{k}": CheckerboardLatentCodec(
+                latent_codec={
+                    "y": GaussianConditionalLatentCodec(quantizer="ste"),
+                },
+                context_prediction=spatial_context[k],
+                entropy_parameters=param_aggregation[k],
+            )
+            for k in range(len(self.groups))
+        }
+
+        # Channel groups with space-channel context model (SCCTX):
+        self.y_lc = ChannelGroupsLatentCodecContiguous(
+            groups=self.groups,
+            channel_context=channel_context,
+            latent_codec=scctx_latent_codec,
+        )
+        self.hyper_lc = HyperLatentCodec(
+            entropy_bottleneck=EntropyBottleneck(z_dim),
+            h_a=h_a,
+            h_s=h_s,
+            quantizer="ste",
+        )
+
+    def forward(self, h, token_res, qp=0):
+        # h: vit output tensor (B,L,C)
+        # can be split into 1d cls token and 2d patch tokens
+        enc_gain = self.q_scale_enc[qp : qp + 1, :, :, :]
+        dec_gain = self.q_scale_dec[qp : qp + 1, :, :, :]
+        if qp == 0:
+            enc_gain = enc_gain.detach()
+            dec_gain = dec_gain.detach()
+
+        B = h.shape[0]
+        h = self.pre_vit_blocks(h)[:, 1:].contiguous()
+        h = rearrange(h, "B (H W) C -> B C H W", H=token_res[0], W=token_res[1])
+        y = self.f_a(h) * enc_gain
+        hyper_out = self.hyper_lc(y)
+        y_out = self.y_lc(y, hyper_out["params"])
+        y_hat = y_out["y_hat"] * dec_gain
+
+        _h_hat = self.f_s(y_hat)
+        _h_hat = rearrange(_h_hat, "B C H W -> B (H W) C")
+        _h_hat = torch.cat([self.post_reg_tokens.expand(B, -1, -1), _h_hat], dim=1)
+        h_hat = self.post_vit_blocks(_h_hat)
+
+        return {
+            "h_hat": h_hat,
+            "likelihoods": {
+                "y": y_out["likelihoods"]["y"],
+                "z": hyper_out["likelihoods"]["z"],
+            },
+        }
+
+    def compress(self, h, token_res, qp=0, **kwargs):
+        enc_gain = self.q_scale_enc[qp : qp + 1, :, :, :]
+        h = self.pre_vit_blocks(h)[:, 1:].contiguous()
+        h = rearrange(h, "B (H W) C -> B C H W", H=token_res[0], W=token_res[1])
+        y = self.f_a(h) * enc_gain
+        # x --16-> h --2-> y --4-> z
+        # if pad 32 for y, y is not compatible with checkerboard codec
+        # so we pad 64 for y, then only need to pad 2 for z
+        y_pad = border_pad(y, 2)
+        hyper_out = self.hyper_lc.compress(y_pad)
+        _, _, y_H, y_W = y.shape
+        y_out = self.y_lc.compress(y, hyper_out["params"][:, :, :y_H, :y_W])
+
+        return {
+            "strings": {"y": y_out["strings"], "z": hyper_out["strings"]},
+            "shape": {
+                "y": y_out["shape"],
+                "z": hyper_out["shape"],
+                "y_pad": (y_H, y_W),
+            },
+        }
+
+    def decompress(self, strings, shape, qp=0, **kwargs):
+        y_strings_ = strings["y"]
+        z_strings_ = strings["z"]
+        hyper_out = self.hyper_lc.decompress(z_strings_, shape["z"])
+        dec_gain = self.q_scale_dec[qp : qp + 1, :, :, :]
+        y_H, y_W = shape["y_pad"]
+        y_out = self.y_lc.decompress(
+            y_strings_, shape["y"], hyper_out["params"][:, :, :y_H, :y_W]
+        )
+        y_hat = y_out["y_hat"] * dec_gain
+        h_hat = self.f_s(y_hat)
         _h_hat = rearrange(h_hat, "B C H W -> B (H W) C")
         _h_hat = torch.cat(
             [self.post_reg_tokens.expand(1, -1, -1), _h_hat], dim=1
