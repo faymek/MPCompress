@@ -36,6 +36,7 @@ from compressai.registry import register_dataset
 
 import numpy as np
 import torch
+import os
 
 
 @register_dataset("FeatureFolder")
@@ -214,7 +215,7 @@ class FeatureFolder(Dataset):
         return feat[start_row:end_row, start_col:end_col]
 
 
-class FeatureDictFolder(Dataset):
+class FeatureDictPerSampleFolder(Dataset):
     def __init__(self, root, transform=None, split="train"):
         splitdir = Path(root) / split
 
@@ -289,6 +290,7 @@ class FeatureDictPerKeyFolder(Dataset):
 def feature_dict_collate_fn(batch):
     """
     自定义collate函数，将多个feature合并成一个大的batch
+    如果是tensor，则拼接；否则取第一个
     """
     collated = {}
     first = batch[0]
@@ -298,5 +300,5 @@ def feature_dict_collate_fn(batch):
             collated[key] = torch.stack(values, dim=0)
         else:
             collated[key] = values[0]
-
+    
     return collated
