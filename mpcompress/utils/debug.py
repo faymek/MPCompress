@@ -25,7 +25,7 @@ def extract_shapes(nested_structure):
 
 def tensor_hash(x):
     if isinstance(x, torch.Tensor):
-        return hashlib.sha256(x.cpu().numpy().tobytes()).hexdigest()
+        return hashlib.sha256(x.detach().cpu().numpy().tobytes()).hexdigest()
     elif isinstance(x, np.ndarray):
         return hashlib.sha256(x.tobytes()).hexdigest()
     else:
