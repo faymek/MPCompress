@@ -159,7 +159,7 @@ class VitUnionLatentCodec(CompressionModel):
             quantizer="ste",
         )
 
-    def forward(self, h, token_res):
+    def forward(self, h, token_res, **kwargs):
         # h: vit output tensor (B,L,C)
         # can be split into 1d cls token and 2d patch tokens
         B = h.shape[0]
@@ -350,7 +350,7 @@ class VitSeparateLatentCodec(CompressionModel):
             quantizer="ste",
         )
 
-    def forward(self, h, token_res):
+    def forward(self, h, token_res, **kwargs):
         # h: vit output tensor (B,L,C)
         # can be split into 1d cls token and 2d patch tokens
         h = self.pre_vit_blocks(h)
@@ -384,7 +384,7 @@ class VitSeparateLatentCodec(CompressionModel):
             },
         }
 
-    def compress(self, h, token_res):
+    def compress(self, h, token_res, **kwargs):
         h = self.pre_vit_blocks(h)
 
         h_cls = h[:, 0:1]
