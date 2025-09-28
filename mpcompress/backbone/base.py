@@ -7,6 +7,39 @@ import torchvision.transforms as transforms
 from mpcompress.backbone.vqgan.vq_model import VQModel  # type: ignore
 
 
+def parse_dtype(dtype):
+    """将字符串或torch.dtype转换为torch.dtype对象"""
+    if isinstance(dtype, torch.dtype):
+        return dtype
+    elif isinstance(dtype, str):
+        # 支持常见的字符串格式
+        dtype_mapping = {
+            "torch.float": torch.float,
+            "torch.float32": torch.float32,
+            "torch.float16": torch.float16,
+            "torch.bfloat16": torch.bfloat16,
+            "torch.double": torch.double,
+            "torch.int": torch.int,
+            "torch.int32": torch.int32,
+            "torch.int64": torch.int64,
+            "float": torch.float,
+            "float32": torch.float32,
+            "float16": torch.float16,
+            "bfloat16": torch.bfloat16,
+            "double": torch.double,
+        }
+        if dtype in dtype_mapping:
+            return dtype_mapping[dtype]
+        else:
+            raise ValueError(
+                f"不支持的数据类型: {dtype}. 支持的类型: {list(dtype_mapping.keys())}"
+            )
+    else:
+        raise ValueError(
+            f"autocast_dtype 必须是字符串或 torch.dtype，得到: {type(dtype)}"
+        )
+
+
 class VqganBackbone(nn.Module):
     def __init__(self, vqgan_config, **kwargs):
         super().__init__()
@@ -40,7 +73,7 @@ class VqganBackbone(nn.Module):
 
 
 class Dinov2TimmBackbone(nn.Module):
-    """    
+    """
     This class extends the DINOv2 model to provide flexible feature extraction.
     The DINOv2 backbone implemented with timm supports variable patch sizes and dynamic input image sizes.
 
@@ -49,22 +82,27 @@ class Dinov2TimmBackbone(nn.Module):
         img_size (int): Base input image size. Defaults to 256.
         patch_size (int): Patch embedding size. Defaults to 16.
         dynamic_size (bool): Whether to support dynamically varying input sizes. Defaults to False.
-        slot (int or None): Block slicing position for feature extraction. Follows Python list slicing conventions. 
+        slot (int or None): Block slicing position for feature extraction. Follows Python list slicing conventions.
                    Defaults to -4.
         n_last_blocks (int): Number of final blocks to utilize for feature aggregation. Defaults to 4.
         ckpt_path (str, optional): Path to pre-trained checkpoint for initialization. Defaults to None.
-    
+        autocast_dtype (str or torch.dtype): Data type for autocast mixed precision.
+                   Supports string format like "torch.float", "torch.float16", "float32", etc.
+                   Defaults to "torch.float".
+        device (str): Device to run the model on. Defaults to "cuda" if available, else "cpu".
+
     Note:
         The `slot` parameter determines the splitting point for dividing the network blocks into:
-        - Front part: blocks[:slot] 
+        - Front part: blocks[:slot]
         - Back part: blocks[slot:]
-        
+
         For example, with slot = -4 and blocks = [0,1,2,3,4,5,6,7,8,9]:
         - Front part: blocks[:-4] = [0,1,2,3,4,5]
         - Back part: blocks[-4:] = [6,7,8,9]
-        
+
         Intermediate feature are extracted after the front part and before the back part.
     """
+
     def __init__(
         self,
         model_size="small",
@@ -74,6 +112,8 @@ class Dinov2TimmBackbone(nn.Module):
         slot=-4,  # cut position
         n_last_blocks=4,  # number of last blocks to take
         ckpt_path=None,
+        device="cuda" if torch.cuda.is_available() else "cpu",
+        cast_dtype="float",  # 使用 autocast 的数据类型，支持字符串配置
     ):
         super().__init__()
         self.n_last_blocks = n_last_blocks
@@ -85,6 +125,9 @@ class Dinov2TimmBackbone(nn.Module):
         self.slot = slot
         self.n_last_blocks = n_last_blocks
         self.ckpt_path = ckpt_path
+        self.device = device
+        self.device_type = self.device.split(":")[0]
+        self.cast_dtype = parse_dtype(cast_dtype)
         self.model = self.load_timm_model()
         self.input_transform = transforms.Compose(
             [
@@ -109,20 +152,21 @@ class Dinov2TimmBackbone(nn.Module):
     def forward(self, x, task="whole"):
         assert task in ["whole", "cls", "seg"]
         with torch.inference_mode():
-            h = self.encode(x, self.slot)
+            h = self.encode(x)
             token_res = (x.size(2) // self.patch_size, x.size(3) // self.patch_size)
             h = self.decode(h, token_res=token_res, task=task)
             return h
 
     def encode(self, x):
         dino = self.model
-        x = self.input_transform(x)
-        x = dino.patch_embed(x)
-        x = dino._pos_embed(x)
-        x = dino.patch_drop(x)
-        x = dino.norm_pre(x)
-        for i, blk in enumerate(dino.blocks[: self.slot]):
-            x = blk(x)
+        with torch.autocast(device_type=self.device_type, dtype=self.cast_dtype):
+            x = self.input_transform(x)
+            x = dino.patch_embed(x)
+            x = dino._pos_embed(x)
+            x = dino.patch_drop(x)
+            x = dino.norm_pre(x)
+            for i, blk in enumerate(dino.blocks[: self.slot]):
+                x = blk(x)
         return x
 
     def decode(self, h, token_res=None, task="whole"):
@@ -167,24 +211,28 @@ class Dinov2TimmBackbone(nn.Module):
                 curr_layer = slot - 1
         else:
             raise ValueError(f"slot must be an int or None, got {type(slot)}")
-        
+
         if curr_layer > min(need_layers):
-            raise ValueError(f"not possible to take required layers, input layer: {curr_layer}, need layers: {need_layers}")
+            raise ValueError(
+                f"not possible to take required layers, input layer: {curr_layer}, need layers: {need_layers}"
+            )
         elif curr_layer == min(need_layers):
             # input feature is just needed
             multi_outputs.append(x)
 
-        for i in range(curr_layer+1, total_layers):
-            x = dino.blocks[i](x)
-            if i in need_layers:
-                multi_outputs.append(x)
+        # 使用 autocast 进行混合精度计算
+        with torch.autocast(device_type=self.device_type, dtype=self.cast_dtype):
+            for i in range(curr_layer + 1, total_layers):
+                x = dino.blocks[i](x)
+                if i in need_layers:
+                    multi_outputs.append(x)
 
-        assert len(multi_outputs) == len(need_layers), (
-            f"only {len(multi_outputs)} / {len(need_layers)} blocks found"
-        )
+            assert len(multi_outputs) == len(need_layers), (
+                f"only {len(multi_outputs)} / {len(need_layers)} blocks found"
+            )
 
-        if norm:
-            multi_outputs = [dino.norm(out) for out in multi_outputs]
+            if norm:
+                multi_outputs = [dino.norm(out) for out in multi_outputs]
 
         if return_format == "[whole]":
             return multi_outputs
