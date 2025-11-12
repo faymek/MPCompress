@@ -304,6 +304,12 @@ def eval_model(cfg):
     for x, img_meta in tqdm.tqdm(dataset):
         x = ToTensor()(x).to(device)
         x = x.unsqueeze(0) if x.dim() == 3 else x
+        x_org = x.clone()
+        pad_size = cfg.get("image_pad", 64)
+        x_padded, padding = center_pad(x, pad_size)
+        if hasattr(model, "use_yuv") and model.use_yuv:
+            x_padded = rgb2ycbcr(x_padded)
+
         # 可选：统计一次模型 forward_test 的计算复杂度（FLOPs）与参数量
         if not did_profile:
             did_profile = profile_function(
