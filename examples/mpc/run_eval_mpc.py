@@ -262,11 +262,11 @@ def eval_model(cfg):
     seg_metric = None
 
     # 根据任务类型构建相应的头部和指标
-    if "cls" in task_name:
+    if head_config and "cls" in task_name:
         print("构建分类头部...")
         cls_head = instantiate_class(head_config).to(device).eval()
         cls_metric = instantiate_class(metric_config)
-    elif "seg" in task_name:
+    elif head_config and "seg" in task_name:
         print("构建分割头部...")
         seg_head = instantiate_class(head_config).to(device).eval()
         seg_metric = instantiate_class(metric_config)
@@ -347,14 +347,14 @@ def eval_model(cfg):
             }
 
         # 更新分类指标
-        if "cls" in task_name:
+        if head_config and "cls" in task_name:
             logits = cls_head.forward(out_net["cls"])
             cls_preds = F.softmax(logits, dim=1)
             values, top_indices = torch.topk(cls_preds, k=5, dim=1)
             cls_metric.update(top_indices, [img_meta["cls_label"]])
 
         # 更新分割指标
-        if "seg" in task_name:
+        if head_config and "seg" in task_name:
             logits = seg_head.predict(out_net["seg"], scale=model.patch_size)
             logits = center_crop(logits, padding)
             seg_preds = logits.argmax(dim=1).squeeze(0)
