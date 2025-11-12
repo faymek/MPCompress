@@ -27,6 +27,12 @@ from mpcompress.metrics.iqa_metrics import create_img_metrics, create_dist_metri
 from mpcompress.utils.tensor_ops import tensor2image, center_pad, center_crop
 from mpcompress.utils.utils import rename_key_by_rules
 # from mpcompress.utils.debug import extract_shapes
+try:
+    from fvcore.nn import FlopCountAnalysis, parameter_count_table
+
+    _FVCORE_AVAILABLE = True
+except Exception:
+    _FVCORE_AVAILABLE = False
 
 # Disable Warnings
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -93,12 +99,12 @@ def mpc_calc_bits_items(out):
 
 @torch.inference_mode()
 def inference_x(
-    model, x, quality=1, real=False, recon=2, return_cls=False, return_seg=False
+    model, x, qp=1, real=False, recon=2, return_cls=False, return_seg=False
 ):
     """推理单个文件"""
     if real:  # 实际压缩
         start = time.time()
-        out_enc = model.compress(x, quality=quality)
+        out_enc = model.compress(x, qp=qp)
         enc_time = time.time() - start
         start = time.time()
         out_net = model.decompress(
@@ -118,7 +124,7 @@ def inference_x(
         start = time.time()
         out_net = model.forward_test(
             x,
-            quality=quality,
+            qp=qp,
             return_rec1=(recon == 1),
             return_rec2=(recon == 2),
             return_cls=return_cls,
@@ -132,6 +138,70 @@ def inference_x(
         }
 
     return time_items, bits_items, out_net
+
+
+def profile_function(func, x, **kwargs):
+    """可选地对 func 进行一次 FLOPs/参数统计并打印。
+
+    参数:
+        func: 被分析的函数
+        x: 单样本输入张量，将作为 inputs 传给 FlopCountAnalysis
+        **kwargs: 可选，支持传入 cfg（用于读取 profile 开关）
+
+    返回值:
+        bool: 若已成功执行统计并打印，返回 True，否则返回 False。
+    """
+    if not _FVCORE_AVAILABLE:
+        print("[profile] 未检测到 fvcore，请先安装：pip install fvcore")
+        return False
+
+    try:
+        # 将函数包装为 nn.Module，以便 FlopCountAnalysis 能够调用并传递 kwargs
+        import torch.nn as nn
+
+        class _FuncModule(nn.Module):
+            def __init__(self, wrapped_func, call_kwargs):
+                super().__init__()
+                self.wrapped_func = wrapped_func
+                self.call_kwargs = call_kwargs
+
+            def forward(self, input_tensor):
+                return self.wrapped_func(input_tensor, **self.call_kwargs)
+
+        wrapper = _FuncModule(func, kwargs)
+
+        fca = FlopCountAnalysis(wrapper, (x,))
+        total_flops = fca.total()
+        by_module = fca.by_module()
+        by_operator = fca.by_operator()
+
+        print("\n====== 计算复杂度（单样本）======")
+        print(f"Total FLOPs: {total_flops / 1e9:.3f} GFLOPs")
+        try:
+            print("\n参数统计（按模块汇总）:")
+            target_model = getattr(func, "__self__", None)
+            if target_model is not None:
+                print(parameter_count_table(target_model))
+        except Exception:
+            pass
+
+        if isinstance(by_module, dict) and len(by_module) > 0:
+            print("\n按模块 FLOPs Top-100：")
+            items = sorted(by_module.items(), key=lambda kv: kv[1], reverse=True)[:100]
+            for name, flops in items:
+                print(f"{name}: {flops / 1e6:.3f} MFLOPs")
+
+        if isinstance(by_operator, dict) and len(by_operator) > 0:
+            print("\n按算子 FLOPs Top-20：")
+            items = sorted(by_operator.items(), key=lambda kv: kv[1], reverse=True)[:20]
+            for name, flops in items:
+                print(f"{name}: {flops / 1e6:.3f} MFLOPs")
+
+        print("===============================================\n")
+        return True
+    except Exception as e:
+        print(f"[profile] 统计失败：{e}")
+        return False
 
 
 @torch.inference_mode()
@@ -151,7 +221,7 @@ def eval_model(cfg):
     # 获取数据集和指标配置
     dataset_config = cfg.datasets[task_config.dataset]
     metric_config = cfg.metrics[task_config.metric]
-    head_config = cfg.heads[cfg.args.head]
+    head_config = cfg.heads[cfg.args.head] if cfg.args.head else None
 
     device = torch.device(cfg.args.device)
     model = instantiate_class(cfg.model).to(device)
@@ -219,15 +289,24 @@ def eval_model(cfg):
         os.makedirs(temp_input_dir, exist_ok=True)
 
     # 评估循环
+    did_profile = False if getattr(cfg.args, "profile", False) else True
     for x, img_meta in tqdm.tqdm(dataset):
         x = ToTensor()(x).to(device)
         x = x.unsqueeze(0) if x.dim() == 3 else x
-        x_padded, padding = center_pad(x, 64)
+        # 可选：统计一次模型 forward_test 的计算复杂度（FLOPs）与参数量
+        if not did_profile:
+            did_profile = profile_function(
+                model.forward_test, 
+                x_padded,
+                qp=cfg.args.quality,
+                return_cls=cls_head is not None,
+                return_seg=seg_head is not None,
+            )
 
         time_items, bits_items, out_net = inference_x(
             model,
             x_padded,
-            quality=cfg.args.quality,
+            qp=cfg.args.quality,
             real=cfg.args.real,
             recon=cfg.args.recon,
             return_cls=cls_head is not None,
@@ -344,6 +423,9 @@ def setup_args():
     parser.add_argument("--verbose", action="store_true", help="详细输出")
     parser.add_argument("--cuda", action="store_true", help="使用CUDA")
     parser.add_argument("--output_dir", type=str, default="", help="输出目录")
+    parser.add_argument(
+        "--profile", action="store_true", help="统计一次FLOPs/参数并按模块与算子打印"
+    )
     return parser
 
 
