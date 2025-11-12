@@ -20,12 +20,16 @@ import math
 import warnings
 
 from mpcompress.datasets import *
+from mpcompress.backbone import *
 from mpcompress.heads import *
 from mpcompress.models import *
 from mpcompress.metrics import *
 from mpcompress.metrics.iqa_metrics import create_img_metrics, create_dist_metrics
 from mpcompress.utils.tensor_ops import tensor2image, center_pad, center_crop
 from mpcompress.utils.utils import rename_key_by_rules
+from mpcompress.utils.transforms import rgb2ycbcr, ycbcr2rgb
+
+
 # from mpcompress.utils.debug import extract_shapes
 try:
     from fvcore.nn import FlopCountAnalysis, parameter_count_table
@@ -77,6 +81,10 @@ def calc_bits_items(out):
             for name, likelihoods in out["likelihoods"].items()
         }
         return bits_items
+    elif "bit_stream" in out:
+        return {
+            "bit_stream": len(out["bit_stream"]) * 8.0,
+        }
     elif "bits" in out:
         return out["bits"]
     else:
@@ -85,13 +93,16 @@ def calc_bits_items(out):
 
 def mpc_calc_bits_items(out):
     mpc_bits_items = {}
-    if "ibranch1" in out or "ibranch2" in out:
+    if "ibranch1" in out or "ibranch2" in out or "ibranch3" in out:
         if "ibranch1" in out:
             for name, value in calc_bits_items(out["ibranch1"]).items():
                 mpc_bits_items[f"i1_{name}"] = value
         if "ibranch2" in out:
             for name, value in calc_bits_items(out["ibranch2"]).items():
                 mpc_bits_items[f"i2_{name}"] = value
+        if "ibranch3" in out:
+            for name, value in calc_bits_items(out["ibranch3"]).items():
+                mpc_bits_items[f"i3_{name}"] = value
     else:
         mpc_bits_items = calc_bits_items(out)
     return mpc_bits_items
@@ -329,21 +340,20 @@ def eval_model(cfg):
         # 计算图像质量指标
         iqa_result = {}
         if cfg.args.recon != 0:
-            x_hat = out_net["rec2" if cfg.args.recon == 2 else "rec1"]
-            x_hat = x_hat.clamp(0, 1)
-            x_hat = center_crop(x_hat, padding)
+            if "x_hat" in out_net:
+                x_hat = out_net["x_hat"]
+                # x_hat = x_hat.clamp(0, 1)
+            else:
+                x_hat = out_net["rec2" if cfg.args.recon == 2 else "rec1"]
+                x_hat = x_hat.clamp(0, 1)
 
-            if cfg.args.output_dir:
-                stem = os.path.splitext(os.path.basename(img_meta["img_path"]))[0]
-                fout = os.path.join(out_sub_dir, f"{stem}.png")
-                img = tensor2image(x_hat)
-                img.save(fout)
-                basename = os.path.basename(img_meta["img_path"])
-                shutil.copy(img_meta["img_path"], f"{temp_input_dir}/{basename}")
+            if hasattr(model, "use_yuv") and model.use_yuv:
+                x_hat = ycbcr2rgb(x_hat)
+            x_hat = center_crop(x_hat, padding)
 
             # 计算PSNR
             iqa_result = {
-                key: func(x_hat, x).item() for key, func in img_metrics_dict.items()
+                key: func(x_hat, x_org).item() for key, func in img_metrics_dict.items()
             }
 
         # 更新分类指标
@@ -418,7 +428,7 @@ def setup_args():
     parser.add_argument("--quality", type=str, default="12.0", help="质量参数")
     parser.add_argument("--real", action="store_true", help="使用实际压缩")
     parser.add_argument(
-        "--recon", type=int, default=2, choices=[0, 1, 2], help="重建层"
+        "--recon", type=int, default=2, choices=[0, 1, 2, 3], help="重建层"
     )
     parser.add_argument("--verbose", action="store_true", help="详细输出")
     parser.add_argument("--cuda", action="store_true", help="使用CUDA")
