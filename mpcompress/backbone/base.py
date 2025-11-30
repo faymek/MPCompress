@@ -114,6 +114,7 @@ class Dinov2TimmBackbone(nn.Module):
         ckpt_path=None,
         device="cuda" if torch.cuda.is_available() else "cpu",
         cast_dtype="float",  # 使用 autocast 的数据类型，支持字符串配置
+        with_registers=False,
     ):
         super().__init__()
         self.n_last_blocks = n_last_blocks
@@ -128,6 +129,7 @@ class Dinov2TimmBackbone(nn.Module):
         self.device = device
         self.device_type = self.device.split(":")[0]
         self.cast_dtype = parse_dtype(cast_dtype)
+        self.with_registers = with_registers
         self.model = self.load_timm_model()
         self.input_transform = transforms.Compose(
             [
@@ -138,8 +140,12 @@ class Dinov2TimmBackbone(nn.Module):
         )
 
     def load_timm_model(self):
+        model_name = f"vit_{self.model_size}_patch14_dinov2.lvd142m"
+        if self.with_registers:
+            model_name = f"vit_{self.model_size}_patch14_reg4_dinov2.lvd142m"
+
         feature_model = timm.create_model(
-            f"vit_{self.model_size}_patch14_dinov2.lvd142m",
+            model_name,
             pretrained=True,
             img_size=self.img_size,
             patch_size=self.patch_size,
