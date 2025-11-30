@@ -44,6 +44,7 @@ class VitUnionLatentCodec(CompressionModel):
         y_dim=256,
         z_dim=192,
         groups=16,
+        num_prefix_tokens=1,
         **kwargs,
     ):
         super().__init__()
@@ -56,7 +57,8 @@ class VitUnionLatentCodec(CompressionModel):
         self.y_dim = y_dim
         self.z_dim = z_dim
 
-        self.post_reg_tokens = nn.Parameter(torch.zeros(1, h_dim), requires_grad=True)
+        self.num_prefix_tokens = num_prefix_tokens
+        self.post_reg_tokens = nn.Parameter(torch.zeros(num_prefix_tokens, h_dim), requires_grad=True)
         self.pre_vit_blocks = nn.Sequential(
             *[Block(dim=h_dim, num_heads=h_dim // 64, mlp_ratio=4) for _ in range(2)]
         )
@@ -163,7 +165,7 @@ class VitUnionLatentCodec(CompressionModel):
         # h: vit output tensor (B,L,C)
         # can be split into 1d cls token and 2d patch tokens
         B = h.shape[0]
-        h = self.pre_vit_blocks(h)[:, 1:].contiguous()
+        h = self.pre_vit_blocks(h)[:, self.num_prefix_tokens:].contiguous()
         h = rearrange(h, "B (H W) C -> B C H W", H=token_res[0], W=token_res[1])
         y = self.f_a(h)
         hyper_out = self.hyper_lc(y)
@@ -184,7 +186,7 @@ class VitUnionLatentCodec(CompressionModel):
         }
 
     def compress(self, h, token_res, **kwargs):
-        h = self.pre_vit_blocks(h)[:, 1:].contiguous()
+        h = self.pre_vit_blocks(h)[:, self.num_prefix_tokens:].contiguous()
         h = rearrange(h, "B (H W) C -> B C H W", H=token_res[0], W=token_res[1])
         y = self.f_a(h)
         # x --16-> h --2-> y --4-> z
@@ -229,6 +231,7 @@ class VbrVitUnionLatentCodec(CompressionModel):
         y_dim=256,
         z_dim=192,
         groups=16,
+        num_prefix_tokens=1,
         **kwargs,
     ):
         super().__init__()
@@ -245,7 +248,8 @@ class VbrVitUnionLatentCodec(CompressionModel):
         self.q_scale_dec = nn.Parameter(torch.ones((65, y_dim, 1, 1)))
         # https://github.com/microsoft/DCVC/blob/main/src/models/image_model.py
 
-        self.post_reg_tokens = nn.Parameter(torch.zeros(1, h_dim), requires_grad=True)
+        self.num_prefix_tokens = num_prefix_tokens
+        self.post_reg_tokens = nn.Parameter(torch.zeros(num_prefix_tokens, h_dim), requires_grad=True)
         self.pre_vit_blocks = nn.Sequential(
             *[Block(dim=h_dim, num_heads=h_dim // 64, mlp_ratio=4) for _ in range(2)]
         )
@@ -358,7 +362,7 @@ class VbrVitUnionLatentCodec(CompressionModel):
             dec_gain = dec_gain.detach()
 
         B = h.shape[0]
-        h = self.pre_vit_blocks(h)[:, 1:].contiguous()
+        h = self.pre_vit_blocks(h)[:, self.num_prefix_tokens:].contiguous()
         h = rearrange(h, "B (H W) C -> B C H W", H=token_res[0], W=token_res[1])
         y = self.f_a(h) * enc_gain
         hyper_out = self.hyper_lc(y)
@@ -380,7 +384,7 @@ class VbrVitUnionLatentCodec(CompressionModel):
 
     def compress(self, h, token_res, qp=0, **kwargs):
         enc_gain = self.q_scale_enc[qp : qp + 1, :, :, :]
-        h = self.pre_vit_blocks(h)[:, 1:].contiguous()
+        h = self.pre_vit_blocks(h)[:, self.num_prefix_tokens:].contiguous()
         h = rearrange(h, "B (H W) C -> B C H W", H=token_res[0], W=token_res[1])
         y = self.f_a(h) * enc_gain
         # x --16-> h --2-> y --4-> z
@@ -413,7 +417,7 @@ class VbrVitUnionLatentCodec(CompressionModel):
         h_hat = self.f_s(y_hat)
         _h_hat = rearrange(h_hat, "B C H W -> B (H W) C")
         _h_hat = torch.cat(
-            [self.post_reg_tokens.expand(1, -1, -1), _h_hat], dim=1
+            [self.post_reg_tokens.expand(_h_hat.shape[0], -1, -1), _h_hat], dim=1
         ).contiguous()
         h_hat = self.post_vit_blocks(_h_hat)
         return {"h_hat": h_hat}
@@ -427,6 +431,7 @@ class VitSeparateLatentCodec(CompressionModel):
         y_dim=256,
         z_dim=192,
         groups=16,
+        num_prefix_tokens=1,
         **kwargs,
     ):
         super().__init__()
@@ -438,7 +443,7 @@ class VitSeparateLatentCodec(CompressionModel):
 
         self.y_dim = y_dim
         self.z_dim = z_dim
-
+        self.num_prefix_tokens = num_prefix_tokens
         # self.post_reg_tokens = nn.Parameter(torch.zeros(1, h_dim), requires_grad=True)
         self.pre_vit_blocks = nn.Sequential(
             *[Block(dim=h_dim, num_heads=h_dim // 64, mlp_ratio=4) for _ in range(2)]
@@ -553,13 +558,13 @@ class VitSeparateLatentCodec(CompressionModel):
         # can be split into 1d cls token and 2d patch tokens
         h = self.pre_vit_blocks(h)
 
-        h_cls = h[:, 0:1]
-        h_cls = rearrange(h_cls, "B 1 C -> B C 1 1")
+        h_cls = h[:, 0:self.num_prefix_tokens]
+        h_cls = rearrange(h_cls, "B L C -> B C L 1")
         cls_out = self.cls_lc(h_cls)
         h_cls_hat = cls_out["params"]
-        h_cls_hat = rearrange(h_cls_hat, "B C 1 1 -> B 1 C")
+        h_cls_hat = rearrange(h_cls_hat, "B C L 1 -> B L C")
 
-        h_patch = h[:, 1:].contiguous()
+        h_patch = h[:, self.num_prefix_tokens:].contiguous()
         h_patch = rearrange(
             h_patch, "B (H W) C -> B C H W", H=token_res[0], W=token_res[1]
         )
@@ -585,11 +590,11 @@ class VitSeparateLatentCodec(CompressionModel):
     def compress(self, h, token_res, **kwargs):
         h = self.pre_vit_blocks(h)
 
-        h_cls = h[:, 0:1]
-        h_cls = rearrange(h_cls, "B 1 C -> B C 1 1")
+        h_cls = h[:, 0:self.num_prefix_tokens]
+        h_cls = rearrange(h_cls, "B L C -> B C L 1")
         cls_out = self.cls_lc.compress(h_cls)
 
-        h_patch = h[:, 1:].contiguous()
+        h_patch = h[:, self.num_prefix_tokens:].contiguous()
         h_patch = rearrange(
             h_patch, "B (H W) C -> B C H W", H=token_res[0], W=token_res[1]
         )
@@ -619,7 +624,7 @@ class VitSeparateLatentCodec(CompressionModel):
     def decompress(self, strings, shape, **kwargs):
         cls_out = self.cls_lc.decompress(strings["cls"], shape["cls"])
         h_cls_hat = cls_out["params"]
-        h_cls_hat = rearrange(h_cls_hat, "B C 1 1 -> B 1 C")
+        h_cls_hat = rearrange(h_cls_hat, "B C L 1 -> B L C")
 
         y_H, y_W = shape["y_pad"]
         hyper_out = self.hyper_lc.decompress(strings["z"], shape["z"])
