@@ -1,0 +1,47 @@
+multi_run:
+  0:
+  8:
+  16:
+  24:
+  32:
+  40:
+  48:
+  56:
+  64:
+
+PROJECT_ROOT: ${oc.env:PROJECT_ROOT}
+
+load:
+  path: /home/faymek/MPCompress/exp/MPC2-v3-base-vbr/Q1.0/runner.last.pth.tar
+  strict: false
+  rules: # type, pattern, replacement
+    - ["startswith", "dino.model", "useless"]
+
+resolution_transform:
+  type: ResolutionTransform
+  mode: center_pad
+  size: 64
+
+model: 
+  type: MPC_I2
+  
+  dino_backbone:
+    type: mpcompress.backbone.Dinov2TimmBackbone
+    model_size: base
+    img_size: 512
+    patch_size: 16
+    dynamic_size: true
+    slot: -3
+    n_last_blocks: 4
+
+  dino_codec:
+    type: mpcompress.latent_codecs.vit_feature_codec.VbrVitUnionLatentCodec
+    h_dim: 768
+    y_dim: 48
+    z_dim: 48
+    groups: 16
+
+allow_heads:
+  - imagenet_cls_small_last4
+  - voc2012_seg_small_last4
+  - ade20k_seg_small_last4

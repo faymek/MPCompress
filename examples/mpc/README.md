@@ -20,88 +20,37 @@ export HF_ENDPOINT=https://hf-mirror.com
 ## 测试方法
 
 ```bash
-# MPC2 测试 ImageNet 分类任务
-python examples/mpc/run_eval_mpc.py \
-    --config examples/mpc/config/eval_base.yaml examples/mpc/config/eval_mpc2.yaml \
-    --checkpoint "" \
-    --task imagenet_sel2k_cls \
+# MPC2 DINO Lagre VBR 测试 ImageNet 分类任务
+CUDA_VISIBLE_DEVICES=0 python examples/mpc/run_eval.py \
+    --config examples/mpc/config/eval_base.yaml examples/mpc/config/eval_MPC2-v3-large-vbr.yaml \
+    --preset imagenet_sel2k_cls \
+    --head "imagenet_cls_large_last4" \
     --quality 1.0 \
-    --cuda --recon 0 --real \
-    --output_dir eval_imagenet_sel2k_mpc2_real
+    --cuda --recon 0 --output_dir eval_test --real
 
-# MPC12 测试 VOC2012 分割任务 
-python examples/mpc/run_eval_mpc.py \
-    --config examples/mpc/config/eval_base.yaml examples/mpc/config/eval_mpc12.yaml \
-    --checkpoint "" \
-    --task voc2012_val_seg \
+# MPC2 DINO Base VBR 测试 VOC2012 分割任务
+CUDA_VISIBLE_DEVICES=0 python examples/mpc/run_eval.py \
+    --config examples/mpc/config/eval_base.yaml examples/mpc/config/eval_MPC2-v3-base-vbr.yaml \
+    --preset voc2012_val_seg \
+    --head "voc2012_seg_base_last4" \
     --quality 1.0 \
-    --cuda --recon 2 --real \
-    --output_dir eval_voc_val_mpc12_real
+    --cuda --recon 0 --output_dir eval_test --real
+
+# MPC2 DINO Small VBR 测试 ADE20K 分割任务
+CUDA_VISIBLE_DEVICES=0 python examples/mpc/run_eval.py \
+    --config examples/mpc/config/eval_base.yaml examples/mpc/config/eval_MPC2-v3-small-vbr.yaml \
+    --preset ade20k_val_seg \
+    --head "ade20k_seg_small_last4" \
+    --quality 1.0 \
+    --cuda --recon 0 --output_dir eval_test --real
 ```
 
 参数说明：
 
 - `--config`: 配置文件路径，可多个叠加
-- `--checkpoint`: 模型权重路径
-- `--task`: 任务名称，需要与配置文件中的任务名称一致
+- `--preset`: 预定义的评估任务名称，需要与配置文件中的任务名称一致
+- `--head`: 头部模型名称，需要是预定义的头部模型
 - `--quality`: 质量因子，仅用作任务标签
 - `--cuda`: 使用CUDA
-- `--verbose`: 启用详细输出，打印每个文件的评估结果
 - `--recon`: 对于MPC模型，使用第几层分支的重建图像，当前可选[0,1,2]
 - `--real`: 启用真实熵编码，写入码流；否则使用码率估计，不写入码流
-
-
-## MPC 实现说明
-
-当前的 MPC 模型实现了图像编码的两层编码
-
-- 第一层采用VQGAN，具体为 [VQGAN-Compression](https://github.com/CUC-MIPG/VQGAN-Compression) 提供的预训练模型，该模型对原始VQGAN进行了聚类微调，将VQ码本大小降低到1024，从而允许更低的码率。
-- 第二层采用DINOv2，具体为 [timm](https://github.com/huggingface/timm) 库的实现，该实现允许任意分辨率输入和任意patch_size的处理。
-
-MPC 模型实现了如下主要的类方法
-
-- forward: 前向推理，用于训练，返回训练所需的特征
-- forward_test: 前向推理，用于测试，按需返回下游任务所需的特征
-- compress: 实际编码方法，返回码流的中间表示
-- decompress: 实际解码方法，按需返回下游任务所需的特征
-
-
-## 数据集
-
-所有数据集都返回 `(img, img_meta)` 格式：
-
-```python
-img_meta = {
-    "img_path": "图像文件路径",
-    "img_name": "图像文件名（不含扩展名）",
-    "ori_size": "原始图像尺寸",
-    "target": "分类标签（可选）",
-    "seg_label_path": "分割标签路径（可选）"
-}
-```
-
-## 评估指标
-
-### 图像质量指标
-
-图像评估指标，建议采用 `pyiqa==0.1.13` 中提供的多种 metrics，以统一计算。
-
-- **PSNR**: 峰值信噪比，值越高表示质量越好
-- **MS-SSIM**: 多尺度结构相似性，范围[0,1]，值越高表示质量越好
-- **LPIPS**: 学习型感知图像质量评估，值越低表示质量越好
-- **CLIP-SIM**: CLIP模型计算的相似度，值越高表示语义相似度越高
-- **FID**: 计算生成图像与真实图像之间的分布距离，值越低表示质量越好
-
-### 分类指标
-- **Top-1 Accuracy**: 预测的最高置信度类别与真实标签匹配的比例
-- **Top-5 Accuracy**: 真实标签在预测的前5个类别中的比例
-
-### 分割指标
-- **mIoU**: 平均交并比，计算所有类别的IoU平均值
-
-### 压缩效率指标
-- **BPP**: 每像素比特数，表示压缩率
-- **编码时间**: 压缩一张图像所需的时间
-- **解码时间**: 解压缩一张图像所需的时间
-
-
