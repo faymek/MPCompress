@@ -12,7 +12,7 @@ multi_run:
 PROJECT_ROOT: ${oc.env:PROJECT_ROOT}
 
 load:
-  path: ${PROJECT_ROOT}/weights/MPC/MPC2-v3-small-vbr-runner.best.pth.tar
+  path: ${PROJECT_ROOT}/weights/MPC/MPC2-v3-small-vbr-pruned.pth.tar
   strict: false
   rules: # type, pattern, replacement
     - ["startswith", "dino.model", "useless"]
