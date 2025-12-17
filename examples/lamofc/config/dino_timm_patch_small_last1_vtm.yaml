@@ -1,0 +1,46 @@
+multi_run:
+  62:
+  57:
+  52:
+  47:
+  42:
+  37:
+  32:
+  27:
+  22:
+
+resolution_transform:
+  type: ResolutionTransform
+  mode: center_pad
+  size: 64
+
+model: 
+  type: Dinov2TimmOnlyPatchCodec
+  
+  dino_backbone:
+    # type: Dinov2TimmBackbone
+    model_size: small
+    img_size: 256
+    patch_size: 16
+    dynamic_size: true
+    slot: -4
+    n_last_blocks: 1
+
+  dino_codec:
+    # type: VtmFeatureCodec
+    cfg:
+      vtm_path: ${PROJECT_ROOT}/weights/std_codec/VTM-21.0
+      model_type: dinov2
+      task: seg
+      max_v: 103.2168
+      min_v: -530.9767
+      trun_high: 20
+      trun_low: -20
+      trun_flag: true
+      quant_samples: 0
+      quant_type: uniform
+      bit_depth: 10 
+
+allow_heads:
+  - imagenet_cls_small_last1
+  - voc2012_seg_small_last1
