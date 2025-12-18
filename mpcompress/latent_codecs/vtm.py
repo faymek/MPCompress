@@ -235,13 +235,13 @@ class VtmCodec:
         bin_path,
         width,
         height,
-        quality: int,
+        qp: int,
         bitdepth: int = 8,
         chroma_format: str = "400",
     ):
         cmd = (
             f"{self.encoder_path} -c {self.config_path} "
-            f'-i {raw_path} -o "" -b {bin_path} -q {quality} --ConformanceWindowMode=1 '
+            f'-i {raw_path} -o "" -b {bin_path} -q {qp} --ConformanceWindowMode=1 '
             f"-wdt {width} -hgt {height} -f 1 -fr 1 "
             f"--InternalBitDepth={bitdepth} --InputBitDepth={bitdepth} "
             f"--InputChromaFormat={chroma_format} --OutputBitDepth={bitdepth} "
@@ -253,6 +253,10 @@ class VtmCodec:
         run_shell(cmd)
 
 
+class VtmImageCodec:
+    pass
+
+
 class VtmFeatureCodec:
     def __init__(self, cfg):
         self.cfg = cfg
@@ -261,7 +265,7 @@ class VtmFeatureCodec:
     def forward_test( # just for debug
         self,
         org_feat,
-        quality: int,
+        qp: int,
     ):
         cfg = self.cfg
         org_feat_shape = org_feat.shape
@@ -286,7 +290,7 @@ class VtmFeatureCodec:
             bin_path,
             pack_feat.shape[1],
             pack_feat.shape[0],
-            quality,
+            qp,
             cfg.bit_depth,
             "400",
         )
@@ -316,10 +320,17 @@ class VtmFeatureCodec:
         if cfg.model_type == "sd3":
             dequant_feat = dequant_feat.astype(np.float16)
 
-        out = {
-            "bits": {"vtm": filesize(bin_path) * 8.0},
-            "encoding_time": enc_time,
-            "decoding_time": dec_time,
+        bitstring = open(bin_path, "rb").read()
+        coded_unit = {
+            "strings": {"vtm": [[bitstring]]},
+            "pstate": {
+                "bin_path": bin_path,
+                "pack_shape": pack_feat.shape,
+                "feat_shape": org_feat.shape,
+                "bit_depth": cfg.bit_depth,
+            }
+        }
+        decoded = {
             "h_hat": dequant_feat,
         }
 
@@ -329,12 +340,12 @@ class VtmFeatureCodec:
         os.unlink(bin_path)
         os.unlink(rec_path)
 
-        return out
+        return coded_unit, decoded
 
     def compress(
         self,
         org_feat,
-        quality: int,
+        qp: int,
     ):
         # expected feature: (N_crop, N_layer, H*W+1, C)
         cfg = self.cfg
@@ -357,21 +368,28 @@ class VtmFeatureCodec:
             bin_path,
             pack_feat.shape[1],
             pack_feat.shape[0],
-            quality,
+            qp,
             cfg.bit_depth,
             "400",
         )
         os.close(fd)
         os.unlink(raw_path)
+        bitstring = open(bin_path, "rb").read()
         return {
-            "bits": {"vtm": filesize(bin_path) * 8.0},
-            "bin_path": bin_path,
-            "pack_shape": pack_feat.shape,
-            "feat_shape": org_feat.shape,
-            "bit_depth": cfg.bit_depth,
+            "strings": {"vtm": [[bitstring]]},
+            "pstate": {
+                "bin_path": bin_path,
+                "pack_shape": pack_feat.shape,
+                "feat_shape": org_feat.shape,
+                "bit_depth": cfg.bit_depth,
+            }
         }
 
-    def decompress(self, bin_path, pack_shape, feat_shape, **kwargs):
+    def decompress(self, strings, pstate, **kwargs):
+        bin_path = pstate["bin_path"]
+        pack_shape = pstate["pack_shape"]
+        feat_shape = pstate["feat_shape"]
+        # model_type, bit_depth, trun_low, trun_high is fixed in self.cfg
         cfg = self.cfg
         rec_path = os.path.splitext(bin_path)[0] + "_rec.yuv"
         # VTM decoding
@@ -396,10 +414,10 @@ class VtmFeatureCodec:
         if cfg.model_type == "sd3":
             dequant_feat = dequant_feat.astype(np.float16)
 
-        out = {
+        decoded = {
             "h_hat": dequant_feat,
         }
         os.unlink(bin_path)
         os.unlink(rec_path)
 
-        return out
+        return decoded

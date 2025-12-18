@@ -199,20 +199,23 @@ class VitUnionLatentCodec(CompressionModel):
 
         return {
             "strings": {"y": y_out["strings"], "z": hyper_out["strings"]},
-            "shape": {
-                "y": y_out["shape"],
-                "z": hyper_out["shape"],
+            "pstate": {
+                "y_shape": y_out["shape"],
+                "z_shape": hyper_out["shape"],
                 "y_pad": (y_H, y_W),
+                "token_res": token_res,
             },
         }
 
-    def decompress(self, strings, shape, **kwargs):
-        y_strings_ = strings["y"]
-        z_strings_ = strings["z"]
-        hyper_out = self.hyper_lc.decompress(z_strings_, shape["z"])
-        y_H, y_W = shape["y_pad"]
+    def decompress(self, strings, pstate, **kwargs):
+        y_strings = strings["y"]
+        z_strings = strings["z"]
+        y_shape = pstate["y_shape"]
+        z_shape = pstate["z_shape"]
+        hyper_out = self.hyper_lc.decompress(z_strings, z_shape)
+        y_H, y_W = pstate["y_pad"]
         y_out = self.y_lc.decompress(
-            y_strings_, shape["y"], hyper_out["params"][:, :, :y_H, :y_W]
+            y_strings, y_shape, hyper_out["params"][:, :, :y_H, :y_W]
         )
         h_hat = self.f_s(y_out["y_hat"])
         _h_hat = rearrange(h_hat, "B C H W -> B (H W) C")
@@ -357,9 +360,6 @@ class VbrVitUnionLatentCodec(CompressionModel):
         # can be split into 1d cls token and 2d patch tokens
         enc_gain = self.q_scale_enc[qp : qp + 1, :, :, :]
         dec_gain = self.q_scale_dec[qp : qp + 1, :, :, :]
-        if qp == 0:
-            enc_gain = enc_gain.detach()
-            dec_gain = dec_gain.detach()
 
         B = h.shape[0]
         h = self.pre_vit_blocks(h)[:, self.num_prefix_tokens:].contiguous()
@@ -397,21 +397,27 @@ class VbrVitUnionLatentCodec(CompressionModel):
 
         return {
             "strings": {"y": y_out["strings"], "z": hyper_out["strings"]},
-            "shape": {
-                "y": y_out["shape"],
-                "z": hyper_out["shape"],
+            "pstate": {
+                "y_shape": y_out["shape"],
+                "z_shape": hyper_out["shape"],
                 "y_pad": (y_H, y_W),
+                "token_res": token_res,
+                "qp": qp,
             },
         }
 
-    def decompress(self, strings, shape, qp=0, **kwargs):
+    def decompress(self, strings, pstate, **kwargs):
         y_strings_ = strings["y"]
         z_strings_ = strings["z"]
-        hyper_out = self.hyper_lc.decompress(z_strings_, shape["z"])
+        y_shape = pstate["y_shape"]
+        z_shape = pstate["z_shape"]
+        qp = pstate["qp"]
+
+        hyper_out = self.hyper_lc.decompress(z_strings_, z_shape)
         dec_gain = self.q_scale_dec[qp : qp + 1, :, :, :]
-        y_H, y_W = shape["y_pad"]
+        y_H, y_W = pstate["y_pad"]
         y_out = self.y_lc.decompress(
-            y_strings_, shape["y"], hyper_out["params"][:, :, :y_H, :y_W]
+            y_strings_, y_shape, hyper_out["params"][:, :, :y_H, :y_W]
         )
         y_hat = y_out["y_hat"] * dec_gain
         h_hat = self.f_s(y_hat)
@@ -613,23 +619,23 @@ class VitSeparateLatentCodec(CompressionModel):
                 "y": y_out["strings"],
                 "z": hyper_out["strings"],
             },
-            "shape": {
-                "cls": cls_out["shape"],
-                "y": y_out["shape"],
-                "z": hyper_out["shape"],
+            "pstate": {
+                "cls_shape": cls_out["shape"],
+                "y_shape": y_out["shape"],
+                "z_shape": hyper_out["shape"],
                 "y_pad": (y_H, y_W),
             },
         }
 
-    def decompress(self, strings, shape, **kwargs):
-        cls_out = self.cls_lc.decompress(strings["cls"], shape["cls"])
+    def decompress(self, strings, pstate, **kwargs):
+        cls_out = self.cls_lc.decompress(strings["cls"], pstate["cls_shape"])
         h_cls_hat = cls_out["params"]
         h_cls_hat = rearrange(h_cls_hat, "B C L 1 -> B L C")
 
-        y_H, y_W = shape["y_pad"]
-        hyper_out = self.hyper_lc.decompress(strings["z"], shape["z"])
+        y_H, y_W = pstate["y_pad"]
+        hyper_out = self.hyper_lc.decompress(strings["z"], pstate["z_shape"])
         y_out = self.y_lc.decompress(
-            strings["y"], shape["y"], hyper_out["params"][:, :, :y_H, :y_W]
+            strings["y"], pstate["y_shape"], hyper_out["params"][:, :, :y_H, :y_W]
         )
         h_patch_hat = self.f_s(y_out["y_hat"])
         h_patch_hat = rearrange(h_patch_hat, "B C H W -> B (H W) C")
@@ -847,17 +853,17 @@ class VitUnionLatentCodecWithCtx(CompressionModel):
 
         return {
             "strings": {"y": y_out["strings"], "z": hyper_out["strings"]},
-            "shape": {"y": y_out["shape"], "z": hyper_out["shape"]},
+            "pstate": {"y_shape": y_out["shape"], "z_shape": hyper_out["shape"], "token_res": token_res},
             # "y_hat": y_out["y_hat"],
         }
 
-    def decompress(self, strings, shape, ctx, **kwargs):
+    def decompress(self, strings, pstate, ctx, **kwargs):
         y_strings_ = strings["y"]
         z_strings_ = strings["z"]
         # assert all(len(y_strings) == len(z_strings) for y_strings in y_strings_)
         ctx_down = self.f_ctx_down(ctx)
-        hyper_out = self.hyper_lc.decompress(z_strings_, shape["z"], ctx_down)
-        y_out = self.y_lc.decompress(y_strings_, shape["y"], hyper_out["params"])
+        hyper_out = self.hyper_lc.decompress(z_strings_, pstate["z_shape"], ctx_down)
+        y_out = self.y_lc.decompress(y_strings_, pstate["y_shape"], hyper_out["params"])
         y_hat = y_out["y_hat"]
 
         h_hat_share = self.f_s(y_hat)
@@ -1035,14 +1041,14 @@ class VitUnionLatentCodecCtxAsHyper(CompressionModel):
 
         return {
             "strings": {"y": y_out["strings"]},
-            "shape": {"y": y_out["shape"]},
+            "pstate": {"y_shape": y_out["shape"]},
             # "y_hat": y_out["y_hat"],
         }
 
-    def decompress(self, strings, shape, ctx, **kwargs):
+    def decompress(self, strings, pstate, ctx, **kwargs):
         y_strings_ = strings["y"]
         ctx_params = self.f_ctx_params(ctx)
-        y_out = self.y_lc.decompress(y_strings_, shape["y"], ctx_params)
+        y_out = self.y_lc.decompress(y_strings_, pstate["y_shape"], ctx_params)
         y_hat = y_out["y_hat"]
 
         h_hat_share = self.f_s(y_hat)
