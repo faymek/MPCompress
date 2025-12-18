@@ -1,33 +1,20 @@
-multi_run:
-  q001:
-    load:
-      path: /home/faymek/MPCompress/exp/MPC2-v3-small/Q1.0/runner.best.pth.tar
-  q003:
-    load:
-      path: /home/faymek/MPCompress/exp/MPC2-v3-small/Q3.0/runner.best.pth.tar
-  q006:
-    load:
-      path: /home/faymek/MPCompress/exp/MPC2-v3-small/Q6.0/runner.best.pth.tar
-  q012:
-    load:
-      path: /home/faymek/MPCompress/exp/MPC2-v3-small/Q12.0/runner.best.pth.tar
-  q024:
-    load:
-      path: /home/faymek/MPCompress/exp/MPC2-v3-small/Q24.0/runner.best.pth.tar
-  q048:
-    load:
-      path: /home/faymek/MPCompress/exp/MPC2-v3-small/Q48.0/runner.best.pth.tar
-  q096:
-    load:
-      path: /home/faymek/MPCompress/exp/MPC2-v3-small/Q96.0/runner.best.pth.tar
-  q192:
+PROJECT_ROOT: ${oc.env:PROJECT_ROOT}
 
+multi_run:
+  q0300:
+    load:
+      path: ${PROJECT_ROOT}/weights/MPC/MPC2-v3-small-q3.0-pruned.pth.tar
 
 load:
-  path: /home/faymek/MPCompress/exp/archieve/MPC2-formal-y48-z48-slot-3/Q3.0/runner.best.pth.tar
+  path:
   strict: false
   rules: # type, pattern, replacement
     - ["startswith", "dino.model", "useless"]
+
+resolution_transform:
+  type: ResolutionTransform
+  mode: center_pad
+  size: 64
 
 model: 
   type: MPC_I2

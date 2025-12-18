@@ -1,0 +1,60 @@
+PROJECT_ROOT: ${oc.env:PROJECT_ROOT}
+
+multi_run:
+  q0600:
+    load:
+      path: ${PROJECT_ROOT}/weights/MPC/MPC12-v2-small-q6.0-pruned.pth.tar
+
+load:
+  path:
+  strict: false
+  rules: # type, pattern, replacement
+
+resolution_transform:
+  type: ResolutionTransform
+  mode: center_pad
+  size: 128
+
+model: 
+  type: MPC_I12
+
+  vqgan_backbone:
+    ckpt_path: ${PROJECT_ROOT}/weights/MPC/VQGAN-kmeans-cb1024.ckpt
+    n_embed: 1024
+    embed_dim: 256
+    ddconfig:
+      double_z: false
+      z_channels: 256
+      resolution: 256
+      in_channels: 3
+      out_ch: 3
+      ch: 128
+      ch_mult: [1, 1, 2, 2, 4]
+      num_res_blocks: 2
+      attn_resolutions:
+      - 16
+      dropout: 0.0
+
+  vqgan_codec:
+    type: UniformTokenCodec
+    alphabet_size: 1024
+
+  dino_backbone:
+    model_size: small
+    img_size: 512
+    patch_size: 16
+    dynamic_size: true
+    slot: -4
+    n_last_blocks: 4
+
+  dino_codec:
+    h_dim: 384
+    y_dim: 48
+    z_dim: 192
+    ctx_dim: 256
+    groups: 16
+
+allow_heads:
+  - imagenet_cls_small_last4
+  - voc2012_seg_small_last4
+  - ade20k_seg_small_last4
