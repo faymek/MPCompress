@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 
-from compressai.registry import register_model
 from compressai.models.base import CompressionModel
 from compressai.models.utils import conv
 
@@ -9,14 +8,15 @@ from mpcompress.backbone.base import Dinov2TimmBackbone, VqganBackbone
 from mpcompress.token_codecs.base import UniformTokenCodec
 from mpcompress.latent_codecs.vit_feature_codec import (
     VitUnionLatentCodec,
-    VitSeparateLatentCodec,
     VitUnionLatentCodecWithCtx,
     VitUnionLatentCodecCtxAsHyper,
-    VbrVitUnionLatentCodec
+    VbrVitUnionLatentCodec,
 )
+from mpcompress.backbone.base import *
+from mpcompress.utils.registery import instantiate_class, register
 
 
-@register_model("MPC_I1")
+@register("MPC_I1")
 class MPC_I1(CompressionModel):  # VqganTokenUniformCodec
     def __init__(self, vqgan_config, **kwargs):
         super().__init__()
@@ -44,7 +44,7 @@ class MPC_I1(CompressionModel):  # VqganTokenUniformCodec
         return task_feats
 
 
-@register_model("MPC_I2")
+@register("MPC_I2")
 class MPC_I2(CompressionModel):
     def __init__(
         self,
@@ -53,8 +53,12 @@ class MPC_I2(CompressionModel):
         **kwargs,
     ):
         super().__init__()
-        self.dino = Dinov2TimmBackbone(**dino_backbone)
-        self.dino_codec = VitUnionLatentCodec(**dino_codec)
+        if "type" in dino_backbone:
+            self.dino = instantiate_class(dino_backbone)
+            self.dino_codec = instantiate_class(dino_codec)
+        else:
+            self.dino = Dinov2TimmBackbone(**dino_backbone)
+            self.dino_codec = VitUnionLatentCodec(**dino_codec)
         self.patch_size = self.dino.patch_size
 
     def forward(self, x, qp=0, **kwargs):  # for lic training
@@ -154,52 +158,7 @@ class MPC_I2(CompressionModel):
         return task_feats
 
 
-        dino_out = self.dino_codec.compress(h_dino, token_res, qp=qp)
-        dino_out["token_res"] = token_res
-        dino_out["qp"] = qp
-        layered_out = {
-            "ibranch2": dino_out,
-        }
-        return layered_out
-
-    def decompress(self, ibranch2, return_cls=False, return_seg=False, **kwargs):
-        dino_out = ibranch2
-        token_res = dino_out["token_res"]
-        dino_out = self.dino_codec.decompress(**dino_out)
-        results = {}
-        if return_cls:
-            results["cls"] = self.dino.decode_cls(dino_out["h_hat"])
-        if return_seg:
-            results["seg"] = self.dino.decode_seg(dino_out["h_hat"], token_res)
-        return results
-
-
-@register_model("MPC_I2_Separate")
-class MPC_I2_Separate(MPC_I2):
-    def __init__(
-        self,
-        dino_backbone={},
-        dino_codec={},
-        **kwargs,
-    ):
-        super().__init__(dino_backbone, dino_codec, **kwargs)
-        self.dino_codec = VitSeparateLatentCodec(**dino_codec)
-
-
-@register_model("MPC_I2_Vbr")
-class MPC_I2_Vbr(MPC_I2):
-    def __init__(
-        self,
-        dino_backbone={},
-        dino_codec={},
-        **kwargs,
-    ):
-        super().__init__(dino_backbone, dino_codec, **kwargs)
-        self.dino_codec = VbrVitUnionLatentCodec(**dino_codec)
-
-
-
-@register_model("MPC_I12")
+@register("MPC_I12")
 class MPC_I12(CompressionModel):
     def __init__(
         self,
@@ -401,7 +360,7 @@ class MPC_I12(CompressionModel):
         return task_feats
 
 
-@register_model("MPC_I12_CtxAsHyper")
+@register("MPC_I12_CtxAsHyper")
 class MPC_I12_CtxAsHyper(CompressionModel):
     def __init__(
         self,

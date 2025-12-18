@@ -1,13 +1,13 @@
-from .mpc import MPC_I1, MPC_I2, MPC_I12, MPC_I2_Vbr
-from .lamofc import Dinov2TimmPatchVtmCodec, Dinov2OrgSlidePatchVtmCodec
+from .mpc import MPC_I1, MPC_I2, MPC_I12, MPC_I12_CtxAsHyper
+from .lamofc import Dinov2TimmOnlyPatchCodec, Dinov2OrigSlideOnlyPatchCodec
 from .no_compress import Dinov2TimmNoCompress
 
 __all__ = [
     "MPC_I1",
     "MPC_I2",
     "MPC_I12",
-    "MPC_I2_Vbr",
-    "Dinov2TimmPatchVtmCodec",
-    "Dinov2OrgSlidePatchVtmCodec",
+    "MPC_I12_CtxAsHyper",
+    "Dinov2TimmOnlyPatchCodec",
+    "Dinov2OrigSlideOnlyPatchCodec",
     "Dinov2TimmNoCompress",
 ]
