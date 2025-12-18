@@ -8,8 +8,8 @@ from mpcompress.latent_codecs.vtm import VtmFeatureCodec
 from mpcompress.utils.debug import extract_shapes
 
 
-@register_model("Dinov2TimmPatchVtmCodec")
-class Dinov2TimmPatchVtmCodec(CompressionModel):
+@register_model("Dinov2TimmPatchCodec")
+class Dinov2TimmOnlyPatchCodec(CompressionModel):
     def __init__(
         self,
         dino_backbone={},
@@ -27,9 +27,8 @@ class Dinov2TimmPatchVtmCodec(CompressionModel):
     def forward(self, x):  # for training
         raise NotImplementedError("VTM does not need training.")
 
-    def forward_test(self, x, quality, return_cls=False, return_seg=False, **kwargs):
+    def forward_test(self, x, qp, tasks, **kwargs):
         with torch.inference_mode():
-            results = {}
             h_dino = self.dino.encode(x)
             token_res = (
                 x.shape[2] // self.dino.patch_size,
@@ -37,17 +36,18 @@ class Dinov2TimmPatchVtmCodec(CompressionModel):
             )
             h_dino = self.dino.decode_seg(h_dino, token_res)
 
-            dino_out = self.dino_codec.forward_test(
-                h_dino[0].cpu().numpy(), quality=quality
+            coded_unit, decoded = self.dino_codec.forward_test(
+                h_dino[0].cpu().numpy(), qp=qp
             )
-
-            if return_cls:
+            task_feats = {}
+            if "cls" in tasks:
                 raise NotImplementedError("cls decoding is not supported")
-            if return_seg:
-                results["seg"] = [torch.from_numpy(dino_out["h_hat"]).to(x.device)]
+            if "seg" in tasks:
+                task_feats["seg"] = [
+                    torch.from_numpy(decoded["h_hat"]).to(x.device)
+                ]
 
-            results["bits"] = dino_out["bits"]
-            return results
+            return coded_unit, task_feats
 
     def get_feature_numel(self, x):
         h_dino = self.dino.encode(x)
@@ -58,32 +58,33 @@ class Dinov2TimmPatchVtmCodec(CompressionModel):
         h_dino = self.dino.decode_seg(h_dino, token_res)[0]
         return h_dino.numel()
 
-    def compress(self, x, quality):
+    def compress(self, x, qp):
         h_dino = self.dino.encode(x)
         token_res = (
             x.shape[2] // self.dino.patch_size,
             x.shape[3] // self.dino.patch_size,
         )
         h_dino = self.dino.decode_seg(h_dino, token_res)
-        dino_out = self.dino_codec.compress(h_dino[0].cpu().numpy(), quality=quality)
-        layered_out = {
-            "ibranch2": dino_out,
+        encoded = self.dino_codec.compress(h_dino[0].cpu().numpy(), qp=qp)
+        coded_unit = {
+            "strings": encoded["strings"],
+            "pstate": encoded["pstate"],
         }
-        return layered_out
+        return coded_unit
 
-    def decompress(self, ibranch2, return_cls=False, return_seg=False, **kwargs):
-        dino_out = ibranch2
-        dino_out = self.dino_codec.decompress(**dino_out)
-        results = {}
-        if return_cls:
+    def decompress(self, coded_unit, tasks=[], **kwargs):
+        encoded = coded_unit
+        decoded = self.dino_codec.decompress(**encoded)
+        task_feats = {}
+        if "cls" in tasks:
             raise NotImplementedError("cls decoding is not supported")
-        if return_seg:
-            results["seg"] = [torch.from_numpy(dino_out["h_hat"]).cuda()]
-        return results
+        if "seg" in tasks:
+            task_feats["seg"] = [torch.from_numpy(decoded["h_hat"]).cuda()]
+        return task_feats
 
 
-@register_model("Dinov2OrgSlidePatchVtmCodec")
-class Dinov2OrgSlidePatchVtmCodec(CompressionModel):
+@register_model("Dinov2OrigSlidePatchCodec")
+class Dinov2OrigSlideOnlyPatchCodec(CompressionModel):
     def __init__(
         self,
         slide_size=[518, 518],
@@ -105,7 +106,7 @@ class Dinov2OrgSlidePatchVtmCodec(CompressionModel):
     def forward(self, x):  # for training
         raise NotImplementedError("VTM does not need training.")
 
-    def forward_test(self, x, quality, return_cls=False, return_seg=False, **kwargs):
+    def forward_test(self, x, qp, tasks=[], **kwargs):
         # h_dino_list: [ [(B,L,C), ...], ..., [(B,L,C), ...] ]
         # stacked_feature: (N_crop, N_layer, H*W+1, C)
         h_dino_list = self.dino.slide_encode(x, self.slide_size, self.slide_stride)
@@ -113,10 +114,8 @@ class Dinov2OrgSlidePatchVtmCodec(CompressionModel):
         stacked_feature = torch.stack(org_feature_list)
         stacked_feature = stacked_feature.cpu().numpy()
 
-        dino_out = self.dino_codec.compress(stacked_feature, quality=quality)
-        dino_out = self.dino_codec.decompress(**dino_out)
-
-        stacked_feature = torch.from_numpy(dino_out["h_hat"]).cuda()
+        coded_unit, decoded = self.dino_codec.forward_test(stacked_feature, qp=qp)
+        stacked_feature = torch.from_numpy(decoded["h_hat"]).cuda()
         feature_list = [
             [
                 stacked_feature[i, j].unsqueeze(0)
@@ -125,19 +124,16 @@ class Dinov2OrgSlidePatchVtmCodec(CompressionModel):
             for i in range(stacked_feature.shape[0])
         ]
 
-        results = {}
-        if return_cls:
+        task_feats = {}
+        if "cls" in tasks:
             raise NotImplementedError("cls decoding is not supported")
-        if return_seg:
+        if "seg" in tasks:
             slide_res = (
                 self.slide_size[0] // self.patch_size,
                 self.slide_size[1] // self.patch_size,
             )
-            results["seg"] = self.dino.slide_decode_seg(feature_list, slide_res)
-            print(extract_shapes(results["seg"]))
-
-            results["bits"] = {"vtm": 0}
-        return results
+            task_feats["seg"] = self.dino.slide_decode_seg(feature_list, slide_res)
+        return coded_unit, task_feats
 
     def get_feature_numel(self, x):
         h_dino_list = self.dino.slide_encode(x, self.slide_size, self.slide_stride)
@@ -145,29 +141,27 @@ class Dinov2OrgSlidePatchVtmCodec(CompressionModel):
         stacked_feature = torch.stack(org_feature_list)
         return stacked_feature.numel()
 
-    def compress(self, x, quality):
+    def compress(self, x, qp):
         # h_dino_list: [ [(B,L,C), ...], ..., [(B,L,C), ...] ]
         # stacked_feature: (N_crop, N_layer, H*W+1, C)
         h_dino_list = self.dino.slide_encode(x, self.slide_size, self.slide_stride)
         org_feature_list = [torch.cat(feature_list) for feature_list in h_dino_list]
         stacked_feature = torch.stack(org_feature_list)
         stacked_feature = stacked_feature.cpu().numpy()
-        token_res = (
-            x.shape[2] // self.dino.patch_size,
-            x.shape[3] // self.dino.patch_size,
-        )
-        dino_out = self.dino_codec.compress(stacked_feature, quality=quality)
-        dino_out["token_res"] = token_res
-        layered_out = {
-            "ibranch2": dino_out,
-        }
-        return layered_out
 
-    def decompress(self, ibranch2, return_cls=False, return_seg=False, **kwargs):
-        dino_out = ibranch2
-        token_res = dino_out["token_res"]
-        dino_out = self.dino_codec.decompress(**dino_out)
-        stacked_feature = torch.from_numpy(dino_out["h_hat"]).cuda()
+        encoded = self.dino_codec.compress(stacked_feature, qp=qp)
+        # Returns values in an adapted (partially compatible) CompressAI format.
+        # is called coded_unit in this reference software
+        coded_unit = {
+            "strings": encoded["strings"],
+            "pstate": encoded["pstate"],
+        }
+        return coded_unit
+
+    def decompress(self, coded_unit, tasks=[], **kwargs):
+        encoded = coded_unit
+        decoded = self.dino_codec.decompress(**encoded)
+        stacked_feature = torch.from_numpy(decoded["h_hat"]).cuda()
         feature_list = [
             [
                 stacked_feature[i, j].unsqueeze(0)
@@ -176,13 +170,13 @@ class Dinov2OrgSlidePatchVtmCodec(CompressionModel):
             for i in range(stacked_feature.shape[0])
         ]
 
-        results = {}
-        if return_cls:
+        task_feats = {}
+        if "cls" in tasks:
             raise NotImplementedError("cls decoding is not supported")
-        if return_seg:
+        if "seg" in tasks:
             slide_res = (
                 self.slide_size[0] // self.patch_size,
                 self.slide_size[1] // self.patch_size,
             )
-            results["seg"] = self.dino.slide_decode_seg(feature_list, slide_res)
-        return results
+            task_feats["seg"] = self.dino.slide_decode_seg(feature_list, slide_res)
+        return task_feats
