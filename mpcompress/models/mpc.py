@@ -40,8 +40,8 @@ class MPC_I1(CompressionModel):  # VqganTokenUniformCodec
         tokens = out["tokens"]
         z_q = self.vqgan.tokens_to_features(tokens)
         x_hat = self.vqgan.decode(z_q)
-        results = {"z_q": z_q, "tokens": tokens, "x_hat": x_hat}
-        return results
+        task_feats = {"z_q": z_q, "tokens": tokens, "x_hat": x_hat}
+        return task_feats
 
 
 @register_model("MPC_I2")
@@ -111,24 +111,23 @@ class MPC_I2(CompressionModel):
             "likelihoods": dino_out["likelihoods"],
         }
 
-    def forward_test(self, x, qp=0, return_cls=False, return_seg=False, **kwargs):
+    def forward_test(self, x, qp=0, tasks=[], **kwargs):
         with torch.inference_mode():
-            results = {}
             h_dino = self.dino.encode(x)
             token_res = (
                 x.shape[2] // self.dino.patch_size,
                 x.shape[3] // self.dino.patch_size,
             )
-            dino_out = self.dino_codec(h_dino, token_res, qp=qp)
-            h_dino_hat = dino_out["h_hat"]
+            coded_unit = self.dino_codec(h_dino, token_res, qp=qp)
+            h_dino_hat = coded_unit["h_hat"]
 
-            if return_cls:
-                results["cls"] = self.dino.decode_cls(h_dino_hat)
-            if return_seg:
-                results["seg"] = self.dino.decode_seg(h_dino_hat, token_res)
+            task_feats = {}
+            if "cls" in tasks:
+                task_feats["cls"] = self.dino.decode_cls(h_dino_hat)
+            if "seg" in tasks:
+                task_feats["seg"] = self.dino.decode_seg(h_dino_hat, token_res)
 
-            results["ibranch2"] = {"likelihoods": dino_out["likelihoods"]}
-            return results
+            return coded_unit, task_feats
 
     def get_feature_numel(self, x):
         h_dino = self.dino.encode(x)
@@ -140,6 +139,21 @@ class MPC_I2(CompressionModel):
             x.shape[2] // self.dino.patch_size,
             x.shape[3] // self.dino.patch_size,
         )
+        coded_unit = self.dino_codec.compress(h_dino, token_res, qp=qp)
+        return coded_unit
+
+    def decompress(self, coded_unit, tasks=[], **kwargs):
+        encoded = coded_unit
+        token_res = coded_unit["pstate"]["token_res"]
+        decoded = self.dino_codec.decompress(**encoded)
+        task_feats = {}
+        if "cls" in tasks:
+            task_feats["cls"] = self.dino.decode_cls(decoded["h_hat"])
+        if "seg" in tasks:
+            task_feats["seg"] = self.dino.decode_seg(decoded["h_hat"], token_res)
+        return task_feats
+
+
         dino_out = self.dino_codec.compress(h_dino, token_res, qp=qp)
         dino_out["token_res"] = token_res
         dino_out["qp"] = qp
@@ -303,18 +317,10 @@ class MPC_I12(CompressionModel):
             "x_hat": x_hat,
         }
 
-    def forward_test(
-        self,
-        x,
-        return_rec1=False,
-        return_rec2=False,
-        return_cls=False,
-        return_seg=False,
-        **kwargs,
-    ):
+    def forward_test(self, x, tasks, **kwargs):
         with torch.inference_mode():
             vqgan_enc = self.vqgan.encode(x)
-            vqgan_out = self.vqgan_codec(
+            vqgan_cu = self.vqgan_codec(
                 vqgan_enc["tokens"]
             )  # just constant likelihoods
             h_vqgan_ctx = vqgan_enc["z_q"]
@@ -324,34 +330,34 @@ class MPC_I12(CompressionModel):
                 x.shape[2] // self.dino.patch_size,
                 x.shape[3] // self.dino.patch_size,
             )
-            dino_out = self.dino_codec(h_dino, h_vqgan_ctx, token_res)
-            h_dino_hat = dino_out["h_hat"]
+            dino_cu = self.dino_codec(h_dino, h_vqgan_ctx, token_res)
+            h_dino_hat = dino_cu["h_hat"]
 
-            results = {}
-            if return_rec1:
-                results["rec1"] = self.vqgan.decode(h_vqgan_ctx)
-            if return_rec2:
+            task_feats = {}
+            if "rec1" in tasks:
+                task_feats["rec1"] = self.vqgan.decode(h_vqgan_ctx)
+            if "rec2" in tasks:
                 h_hat_for_vqgan = self.cond_dec_for_vqgan(
-                    torch.cat([dino_out["h_hat_share"].detach(), h_vqgan_ctx], dim=1)
+                    torch.cat([dino_cu["h_hat_share"].detach(), h_vqgan_ctx], dim=1)
                 )
-                results["rec2"] = self.vqgan.decode(h_hat_for_vqgan)
-            if return_cls:
-                results["cls"] = self.dino.decode_cls(h_dino_hat)
-            if return_seg:
-                results["seg"] = self.dino.decode_seg(h_dino_hat, token_res)
+                task_feats["rec2"] = self.vqgan.decode(h_hat_for_vqgan)
+            if "cls" in tasks:
+                task_feats["cls"] = self.dino.decode_cls(h_dino_hat)
+            if "seg" in tasks:
+                task_feats["seg"] = self.dino.decode_seg(h_dino_hat, token_res)
 
-            # results["likelihoods"] = {
-            #     "y": dino_out["likelihoods"]["y"],
-            #     "z": dino_out["likelihoods"]["z"],
-            #     "z_q": vqgan_out["likelihoods"]["y"],
-            # }
-            results["ibranch1"] = {"likelihoods": vqgan_out["likelihoods"]}
-            results["ibranch2"] = {"likelihoods": dino_out["likelihoods"]}
-            return results
+            coded_data = {
+                "type": "frame",
+                "data": {
+                    "layer1": vqgan_cu,
+                    "layer2": dino_cu,
+                },
+            }
+            return coded_data, task_feats
 
     def compress(self, x, **kwargs):
         vqgan_enc = self.vqgan.encode(x)
-        vqgan_out = self.vqgan_codec.compress(vqgan_enc["tokens"])
+        vqgan_cu = self.vqgan_codec.compress(vqgan_enc["tokens"])
         h_vqgan_ctx = vqgan_enc["z_q"]
 
         h_dino = self.dino.encode(x)
@@ -359,45 +365,40 @@ class MPC_I12(CompressionModel):
             x.shape[2] // self.dino.patch_size,
             x.shape[3] // self.dino.patch_size,
         )
-        dino_out = self.dino_codec.compress(h_dino, h_vqgan_ctx, token_res)
-        dino_out["token_res"] = token_res
-        layered_out = {
-            "ibranch1": vqgan_out,
-            "ibranch2": dino_out,
+        dino_cu = self.dino_codec.compress(h_dino, h_vqgan_ctx, token_res)
+
+        coded_data = {
+            "type": "frame",
+            "data": {
+                "layer1": vqgan_cu,
+                "layer2": dino_cu,
+            },
         }
-        return layered_out
+        return coded_data
 
-    def decompress(
-        self,
-        ibranch1,
-        ibranch2,
-        return_rec1=False,
-        return_rec2=False,
-        return_cls=False,
-        return_seg=False,
-        **kwargs,
-    ):
-        results = {}
-        vqgan_out = ibranch1
-        dino_out = ibranch2
-        token_res = dino_out["token_res"]
-        vqgan_out = self.vqgan_codec.decompress(**vqgan_out)
-        h_vqgan_ctx = self.vqgan.tokens_to_features(vqgan_out["tokens"])
-        dino_out = self.dino_codec.decompress(**dino_out, ctx=h_vqgan_ctx)
+    def decompress(self, coded_data, tasks=[], **kwargs):
+        vqgan_cu = coded_data["data"]["layer1"]
+        dino_cu = coded_data["data"]["layer2"]
 
-        if return_rec1:
-            results["rec1"] = self.vqgan.decode(h_vqgan_ctx)
-        if return_rec2:
+        token_res = dino_cu["pstate"]["token_res"]
+        vqgan_decoded = self.vqgan_codec.decompress(**vqgan_cu)
+        h_vqgan_ctx = self.vqgan.tokens_to_features(vqgan_decoded["tokens"])
+        dino_decoded = self.dino_codec.decompress(**dino_cu, ctx=h_vqgan_ctx)
+
+        task_feats = {}
+        if "rec1" in tasks:
+            task_feats["rec1"] = self.vqgan.decode(h_vqgan_ctx)
+        if "rec2" in tasks:
             h_hat_for_vqgan = self.cond_dec_for_vqgan(
-                torch.cat([dino_out["h_hat_share"].detach(), h_vqgan_ctx], dim=1)
+                torch.cat([dino_decoded["h_hat_share"].detach(), h_vqgan_ctx], dim=1)
             )
-            results["rec2"] = self.vqgan.decode(h_hat_for_vqgan)
-        if return_cls:
-            results["cls"] = self.dino.decode_cls(dino_out["h_hat"])
-        if return_seg:
-            results["seg"] = self.dino.decode_seg(dino_out["h_hat"], token_res)
+            task_feats["rec2"] = self.vqgan.decode(h_hat_for_vqgan)
+        if "cls" in tasks:
+            task_feats["cls"] = self.dino.decode_cls(dino_decoded["h_hat"])
+        if "seg" in tasks:
+            task_feats["seg"] = self.dino.decode_seg(dino_decoded["h_hat"], token_res)
 
-        return results
+        return task_feats
 
 
 @register_model("MPC_I12_CtxAsHyper")
@@ -468,15 +469,12 @@ class MPC_I12_CtxAsHyper(CompressionModel):
     def forward_test(
         self,
         x,
-        return_rec1=False,
-        return_rec2=False,
-        return_cls=False,
-        return_seg=False,
-        **kwargs,
+        tasks,
+        **kwargs
     ):
         with torch.inference_mode():
             vqgan_enc = self.vqgan.encode(x)
-            vqgan_out = self.vqgan_codec(
+            vqgan_cu = self.vqgan_codec(
                 vqgan_enc["tokens"]
             )  # just constant likelihoods
             h_vqgan_ctx = vqgan_enc["z_q"]
@@ -486,29 +484,34 @@ class MPC_I12_CtxAsHyper(CompressionModel):
                 x.shape[2] // self.dino.patch_size,
                 x.shape[3] // self.dino.patch_size,
             )
-            dino_out = self.dino_codec(h_dino, h_vqgan_ctx, token_res)
-            h_dino_hat = dino_out["h_hat"]
+            dino_cu = self.dino_codec(h_dino, h_vqgan_ctx, token_res)
+            h_dino_hat = dino_cu["h_hat"]
 
-            results = {}
-            if return_rec1:
-                results["rec1"] = self.vqgan.decode(h_vqgan_ctx)
-            if return_rec2:
+            task_feats = {}
+            if "rec1" in tasks:
+                task_feats["rec1"] = self.vqgan.decode(h_vqgan_ctx)
+            if "rec2" in tasks:
                 h_hat_for_vqgan = self.cond_dec_for_vqgan(
-                    torch.cat([dino_out["h_hat_share"].detach(), h_vqgan_ctx], dim=1)
+                    torch.cat([dino_cu["h_hat_share"].detach(), h_vqgan_ctx], dim=1)
                 )
-                results["rec2"] = self.vqgan.decode(h_hat_for_vqgan)
-            if return_cls:
-                results["cls"] = self.dino.decode_cls(h_dino_hat)
-            if return_seg:
-                results["seg"] = self.dino.decode_seg(h_dino_hat, token_res)
+                task_feats["rec2"] = self.vqgan.decode(h_hat_for_vqgan)
+            if "cls" in tasks:
+                task_feats["cls"] = self.dino.decode_cls(h_dino_hat)
+            if "seg" in tasks:
+                task_feats["seg"] = self.dino.decode_seg(h_dino_hat, token_res)
 
-            results["ibranch1"] = {"likelihoods": vqgan_out["likelihoods"]}
-            results["ibranch2"] = {"likelihoods": dino_out["likelihoods"]}
-            return results
+            coded_data = {
+                "type": "frame",
+                "data": {
+                    "layer1": vqgan_cu,
+                    "layer2": dino_cu,
+                },
+            }
+            return coded_data, task_feats
 
     def compress(self, x, **kwargs):
         vqgan_enc = self.vqgan.encode(x)
-        vqgan_out = self.vqgan_codec.compress(vqgan_enc["tokens"])
+        vqgan_cu = self.vqgan_codec.compress(vqgan_enc["tokens"])
         h_vqgan_ctx = vqgan_enc["z_q"]
 
         h_dino = self.dino.encode(x)
@@ -516,42 +519,36 @@ class MPC_I12_CtxAsHyper(CompressionModel):
             x.shape[2] // self.dino.patch_size,
             x.shape[3] // self.dino.patch_size,
         )
-        dino_out = self.dino_codec.compress(h_dino, h_vqgan_ctx, token_res)
-        dino_out["token_res"] = token_res
-        layered_out = {
-            "ibranch1": vqgan_out,
-            "ibranch2": dino_out,
+        dino_cu = self.dino_codec.compress(h_dino, h_vqgan_ctx, token_res)
+
+        coded_data = {
+            "type": "frame",
+            "data": {
+                "layer1": vqgan_cu,
+                "layer2": dino_cu,
+            },
         }
-        return layered_out
+        return coded_data
 
-    def decompress(
-        self,
-        ibranch1,
-        ibranch2,
-        return_rec1=False,
-        return_rec2=False,
-        return_cls=False,
-        return_seg=False,
-        **kwargs,
-    ):
-        results = {}
-        vqgan_out = ibranch1
-        dino_out = ibranch2
-        token_res = dino_out["token_res"]
-        vqgan_out = self.vqgan_codec.decompress(**vqgan_out)
-        h_vqgan_ctx = self.vqgan.tokens_to_features(vqgan_out["tokens"])
-        dino_out = self.dino_codec.decompress(**dino_out, ctx=h_vqgan_ctx)
+    def decompress(self, coded_data, tasks=[], **kwargs):
+        vqgan_cu = coded_data["data"]["layer1"]
+        dino_cu = coded_data["data"]["layer2"]
+        token_res = dino_cu["pstate"]["token_res"]
+        vqgan_decoded = self.vqgan_codec.decompress(**vqgan_cu)
+        h_vqgan_ctx = self.vqgan.tokens_to_features(vqgan_decoded["tokens"])
+        dino_decoded = self.dino_codec.decompress(**dino_cu, ctx=h_vqgan_ctx)
 
-        if return_rec1:
-            results["rec1"] = self.vqgan.decode(h_vqgan_ctx)
-        if return_rec2:
+        task_feats = {}
+        if "rec1" in tasks:
+            task_feats["rec1"] = self.vqgan.decode(h_vqgan_ctx)
+        if "rec2" in tasks:
             h_hat_for_vqgan = self.cond_dec_for_vqgan(
-                torch.cat([dino_out["h_hat_share"].detach(), h_vqgan_ctx], dim=1)
+                torch.cat([dino_decoded["h_hat_share"].detach(), h_vqgan_ctx], dim=1)
             )
-            results["rec2"] = self.vqgan.decode(h_hat_for_vqgan)
-        if return_cls:
-            results["cls"] = self.dino.decode_cls(dino_out["h_hat"])
-        if return_seg:
-            results["seg"] = self.dino.decode_seg(dino_out["h_hat"], token_res)
+            task_feats["rec2"] = self.vqgan.decode(h_hat_for_vqgan)
+        if "cls" in tasks:
+            task_feats["cls"] = self.dino.decode_cls(dino_decoded["h_hat"])
+        if "seg" in tasks:
+            task_feats["seg"] = self.dino.decode_seg(dino_decoded["h_hat"], token_res)
 
-        return results
+        return task_feats
