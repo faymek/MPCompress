@@ -8,8 +8,8 @@ from compressai.models.base import CompressionModel
 from mpcompress.backbone.base import Dinov2TimmBackbone
 
 
-@register_model("Dinov2TimmNoCompress")
-class Dinov2TimmNoCompress(CompressionModel):
+@register_model("Dinov2TimmBypass")
+class Dinov2TimmBypass(CompressionModel):
     def __init__(
         self,
         dino_backbone={},
@@ -19,22 +19,25 @@ class Dinov2TimmNoCompress(CompressionModel):
         self.dino = Dinov2TimmBackbone(**dino_backbone)
         self.patch_size = self.dino.patch_size
 
-    def forward_test(self, x, return_cls=False, return_seg=False, **kwargs):
+    def forward_test(self, x, tasks=[], **kwargs):
         with torch.inference_mode():
-            results = {}
             h_dino = self.dino.encode(x)
 
             token_res = (
                 x.shape[2] // self.dino.patch_size,
                 x.shape[3] // self.dino.patch_size,
             )
-            if return_cls:
-                results["cls"] = self.dino.decode_cls(h_dino)
-            if return_seg:
-                results["seg"] = self.dino.decode_seg(h_dino, token_res)
+            task_feats = {}
+            if "cls" in tasks:
+                task_feats["cls"] = self.dino.decode_cls(h_dino)
+            if "seg" in tasks:
+                task_feats["seg"] = self.dino.decode_seg(h_dino, token_res)
 
-            results["ibranch2"] = {"bits": {"t": 0}}
-            return results
+            coded_unit = {
+                "strings": {"bypass": [[b""]]},  # empty bytes
+                "pstate": {"token_res": token_res},
+            }
+            return coded_unit, task_feats
 
     def get_feature_numel(self, x):
         h_dino = self.dino.encode(x)
