@@ -24,13 +24,13 @@ class UniformTokenCodec(CompressionModel):
         string = encode_uniform_to_bits(tokens.flatten(), alphabet_size)
         return {
             "strings": {"t": [[string]]},  # for consistent API
-            "shape": {"t": tuple(tokens.shape)},
+            "pstate": {"t_shape": tuple(tokens.shape)},
         }
 
-    def decompress(self, strings, shape, **kwargs):
+    def decompress(self, strings, pstate, **kwargs):
         # for consistent API
         _strings = strings["t"][0][0]
-        _shape = shape["t"]
+        _shape = pstate["t_shape"]
         symbols_len = 1
         for dim in _shape:  # no batch dim
             symbols_len *= dim
