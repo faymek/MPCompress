@@ -90,18 +90,16 @@ class MPC_I2(CompressionModel):
 
     def offline_forward(self, data, device, qp=0, **kwargs):  # for lic training
         with torch.inference_mode():
-            h_dino = data["h_dino"].to(device)
+            h_dino = data["h_dino"].to(device).float()
+            _, _, H, W = data["x_shape"]
+            token_res = (H // self.patch_size, W // self.patch_size)
 
             # x_uint8 = data["x_uint8"].to(device)
             # x = x_uint8 / 255.0
-            # h_dino_ref = self.dino.encode(x).to(torch.float16).float()
+            # h_dino_ref = self.dino.encode(x).float()
+            # print(torch.mean(torch.abs(h_dino - h_dino_ref)))
             # assert torch.allclose(h_dino, h_dino_ref), "not consistent"
 
-            tokens = data["tokens"].to(device)
-            token_res = (
-                tokens.shape[-2],
-                tokens.shape[-1],
-            )
             o_dino = self.dino.decode_whole(h_dino, token_res)[-1]
 
         h_dino = h_dino.clone()
@@ -224,7 +222,6 @@ class MPC_I12(CompressionModel):
         }
 
     def extract_feature(self, x, **kwargs):  # for training
-        x = x.clone().contiguous()
         with torch.inference_mode():
             vqgan_enc = self.vqgan.encode(x)
             h_dino = self.dino.encode(x)
@@ -235,19 +232,16 @@ class MPC_I12(CompressionModel):
 
     def offline_forward(self, data, device, **kwargs):  # for training
         with torch.inference_mode():
-
-            h_dino = data["h_dino"].to(device)
-            tokens = data["tokens"].to(device)
+            h_dino = data["h_dino"].to(device).float()
+            tokens = data["tokens"].to(device).long()
+            _, _, H, W = data["x_shape"]
+            token_res = (H // self.patch_size, W // self.patch_size)
 
             # x_uint8 = data["x_uint8"].to(device)
             # x = x_uint8 / 255.0
             # h_dino_ref = self.dino.encode(x).to(torch.float16).float()
             # assert torch.allclose(h_dino, h_dino_ref)
 
-            token_res = (
-                tokens.shape[-2],
-                tokens.shape[-1],
-            )
             o_dino = self.dino.decode_whole(h_dino, token_res)[-1]
 
         h_dino = h_dino.clone()
