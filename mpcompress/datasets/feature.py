@@ -231,9 +231,6 @@ class FeatureDictPerSampleFolder(Dataset):
         file = self.samples[idx]
         with open(file, "rb") as f:
             data = torch.load(f, map_location="cpu", weights_only=True)
-        data["tokens"] = data["tokens"].long()
-        data["h_dino"] = data["h_dino"].float()
-        data["token_res"] = (32, 32)
         return data
 
 
@@ -271,15 +268,7 @@ class FeatureDictPerKeyFolder(Dataset):
         for key in self.keys:
             with open(self.samples[key][idx], "rb") as f:
                 value = torch.load(f, map_location="cpu", weights_only=True)
-            if key == "tokens":
-                data[key] = value.long()
-            elif key == "h_dino":
-                data[key] = value.float()
-            else:
                 data[key] = value
-        data["token_res"] = (32, 32)
-        if "x_uint8" not in self.keys:
-            data["x_uint8"] = torch.zeros(3, 512, 512, dtype=torch.uint8)
 
         if self.transform:
             data = self.transform(data)
@@ -298,7 +287,9 @@ def feature_dict_collate_fn(batch):
         values = [item[key] for item in batch]
         if isinstance(values[0], torch.Tensor):
             collated[key] = torch.stack(values, dim=0)
+        elif isinstance(values[0], torch.Size):
+            new_size = (len(batch),) + values[0]
+            collated[key] = torch.Size(new_size)
         else:
             collated[key] = values[0]
-    
     return collated
