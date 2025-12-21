@@ -1,5 +1,4 @@
-# MPC12-v2 config, same arch as MPC12-v1-EmD48G3
-# but using the refactored code
+PROJECT_ROOT: ${oc.env:PROJECT_ROOT}
 
 exp:
   name: MPC12-v3-large-offline
@@ -9,7 +8,7 @@ model:
   type: MPC_I12
 
   vqgan_backbone:
-    ckpt_path: /home/faymek/Models/kmeans_tune/16384_kmeans_1024_epoch/epoch1/checkpoints/last.ckpt
+    ckpt_path: ${PROJECT_ROOT}/weights/MPC/VQGAN-kmeans-cb1024.ckpt
     n_embed: 1024
     embed_dim: 256
     ddconfig:
@@ -76,14 +75,14 @@ main_scheduler:
   gamma: 0.1
 
 train_dataset:
-  type: FeatureDictFolder
-  root: /home/faymek/MPCompress/data/dataset/FD-large
+  type: FeatureDictPerSampleFolder
+  root: ${PROJECT_ROOT}/features/MPC12-v3-large-extract
   split: train
 
 val_dataset:
-  type: FeatureDictFolder
-  root: /home/faymek/MPCompress/data/dataset/FD-large
-  split: test
+  type: FeatureDictPerSampleFolder
+  root: ${PROJECT_ROOT}/features/MPC12-v3-large-extract
+  split: val
 
 train_transforms:
   type: Compose

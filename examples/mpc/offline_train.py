@@ -35,7 +35,13 @@ from mpcompress.datasets import ImageFolder
 from mpcompress.utils.utils import setup_logger
 from mpcompress.utils.tensor_ops import tensor2image
 from mpcompress.utils.utils import rename_key_by_rules
-from mpcompress.datasets.feature import FeatureDictFolder, feature_dict_collate_fn
+from mpcompress.datasets.feature import (
+    FeatureDictPerSampleFolder,
+    feature_dict_collate_fn,
+)
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 def get_obj_from_str(string, reload=False):
@@ -296,13 +302,8 @@ class Trainer:
         self.logger.info(f"EXP: {self.cfg.exp.name}")
 
     def setup_offline_data(self):
-
-        train_dataset = instantiate_class(
-            self.cfg.train_dataset
-        )
-        test_dataset = instantiate_class(
-            self.cfg.val_dataset
-        )
+        train_dataset = instantiate_class(self.cfg.train_dataset)
+        test_dataset = instantiate_class(self.cfg.val_dataset)
 
         self.train_dataloader = DataLoader(
             train_dataset,
@@ -385,7 +386,7 @@ class Trainer:
 
         # data = data.to(self.device)
         out_net = self.model.offline_forward(data, self.device)
-        loss, monitor = self.criterion.forward(out_net, data["x"])
+        loss, monitor = self.criterion.forward(out_net, x=None, x_shape=data["x_shape"])
         loss.backward()
         if self.cfg.misc.clip_max_norm > 0:
             torch.nn.utils.clip_grad_norm_(
@@ -433,7 +434,7 @@ class Trainer:
             for idx, data in enumerate(pbar):
                 data = data.to(self.device)
                 out_net = self.model.offline_forward(data, self.device)
-                loss, monitor = self.criterion.forward(out_net, data["x"])
+                loss, monitor = self.criterion.forward(out_net, x=None, x_shape=data["x_shape"])
                 monitor["Aux"] = self.model.aux_loss().item()
                 desc = self.monitor_to_str(monitor)
                 pbar.set_postfix_str(desc)
@@ -459,12 +460,12 @@ class Trainer:
         with torch.inference_mode():
             for idx, data in enumerate(pbar):
                 out_net = self.model.offline_forward(data, self.device)
-                loss, monitor = self.criterion.forward(out_net, data["x"])
+                loss, monitor = self.criterion.forward(out_net, x=None, x_shape=data["x_shape"])
                 monitor["Aux"] = self.model.aux_loss().item()
                 desc = self.monitor_to_str(monitor)
                 pbar.set_postfix_str(desc)
                 monitor_meter.update(monitor)
-                if self.cfg.misc.visual and "x_hat" in out_net:
+                if self.cfg.misc.visual and "x_hat" in out_net and "x" in data:
                     if idx in idx_for_visual:
                         self.log_images(idx, data["x"], out_net["x_hat"])
 
@@ -492,7 +493,7 @@ class Trainer:
         if org_tensor.dim() == 3:
             org_tensor = org_tensor.unsqueeze(0)
             rec_tensor = rec_tensor.unsqueeze(0)
-        
+
         for i in range(org_tensor.shape[0]):
             ori_img = tensor2image(org_tensor[i])
             rec_img = tensor2image(rec_tensor[i])
