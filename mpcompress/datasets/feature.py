@@ -1,64 +1,41 @@
-# Copyright (c) 2021-2024, InterDigital Communications, Inc
-# All rights reserved.
-
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted (subject to the limitations in the disclaimer
-# below) provided that the following conditions are met:
-
-# * Redistributions of source code must retain the above copyright notice,
-#   this list of conditions and the following disclaimer.
-# * Redistributions in binary form must reproduce the above copyright notice,
-#   this list of conditions and the following disclaimer in the documentation
-#   and/or other materials provided with the distribution.
-# * Neither the name of InterDigital Communications, Inc nor the names of its
-#   contributors may be used to endorse or promote products derived from this
-#   software without specific prior written permission.
-
-# NO EXPRESS OR IMPLIED LICENSES TO ANY PARTY'S PATENT RIGHTS ARE GRANTED BY
-# THIS LICENSE. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
-# CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT
-# NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-# PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
-# CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-# EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-# PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-# OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-# OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-# ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
 from pathlib import Path
 import os
-from PIL import Image
 from torch.utils.data import Dataset
 
 from compressai.registry import register_dataset
 
 import numpy as np
 import torch
-import os
 
 
 @register_dataset("FeatureFolder")
 class FeatureFolder(Dataset):
-    """Load an feature folder database. Training and testing feature samples
-    are respectively stored in separate directories:
+    """Load a feature folder database.
 
-    .. code-block::
-
-        - rootdir/
-            - train/
-                - img000.png
-                - img001.png
-            - test/
-                - img000.png
-                - img001.png
+    This dataset loads feature files (numpy .npy files) from a directory and
+    applies preprocessing including truncation, quantization, packing, and random
+    cropping. The features are processed according to the specified model type.
 
     Args:
-        root (string): root directory of the dataset
-        transform (callable, optional): a function or transform that takes in a
-            PIL image and returns a transformed version
-        split (string): split mode ('train' or 'val')
+        root (str): Root directory containing feature files.
+        transform (callable, optional): A function or transform that takes in a
+            feature and returns a transformed version. Defaults to None.
+        split (str): Split mode ('train' or 'val'). Currently unused, features are
+            loaded directly from root directory. Defaults to "train".
+        model_type (str): Model type for feature packing. Supported types:
+            "llama3", "dinov2", "sd3". Defaults to "sd3".
+        task (str): Task type. Defaults to "tti".
+        trun_flag (bool): Whether to apply truncation to features. Defaults to False.
+        trun_low (float or list[float]): Lower bound(s) for truncation. If list,
+            each channel has its own bound. Defaults to -20.
+        trun_high (float or list[float]): Upper bound(s) for truncation. If list,
+            each channel has its own bound. Defaults to 20.
+        quant_type (str): Quantization type. Currently only "uniform" is supported.
+            Defaults to "uniform".
+        qsamples (int): Number of quantization samples. Defaults to 0.
+        bit_depth (int): Bit depth for uniform quantization. Defaults to 1.
+        patch_size (tuple[int, int]): Patch size for random cropping in format
+            (height, width). Must be a multiple of 64. Defaults to (512, 512).
     """
 
     def __init__(
@@ -83,12 +60,10 @@ class FeatureFolder(Dataset):
             raise RuntimeError(f'Missing directory "{splitdir}"')
 
         self.samples = sorted(f for f in splitdir.iterdir() if f.is_file())
-        # gcs
-        # self.samples = self.samples[:100]
 
         self.transform = transform
 
-        # gcs
+        # Feature preprocessing parameters
         self.model_type = model_type
         self.task = task
         self.trun_flag = trun_flag
@@ -97,20 +72,22 @@ class FeatureFolder(Dataset):
         self.quant_type = quant_type
         self.qsamples = qsamples
         self.bit_depth = bit_depth
-        self.patch_size = patch_size  # (height, width), must be the multiple of 64
+        self.patch_size = patch_size
 
     def __getitem__(self, index):
-        """
+        """Get a feature sample from the dataset.
+
         Args:
-            index (int): Index
+            index (int): Index of the sample to retrieve.
 
         Returns:
-            img: `PIL.Image.Image` or transformed `PIL.Image.Image`.
+            feat (numpy.ndarray): Preprocessed feature array of shape (1, H, W) after
+                truncation, quantization, packing, and random cropping.
         """
         # Load feature, use float32 for training
         feat = np.load(self.samples[index]).astype(np.float32)
-        # gcs, preprocessing
-        if self.trun_flag == True:
+        # Apply preprocessing: truncation, quantization, packing, and cropping
+        if self.trun_flag is True:
             feat = FeatureFolder.truncation(feat, self.trun_low, self.trun_high)
         feat = FeatureFolder.uniform_quantization(
             feat, self.trun_low, self.trun_high, self.bit_depth
@@ -118,16 +95,33 @@ class FeatureFolder(Dataset):
         feat = FeatureFolder.packing(feat, self.model_type)
         feat = FeatureFolder.random_crop(
             feat, self.patch_size
-        )  # (height, width), must be the multiple of 64
-        feat = np.expand_dims(feat, axis=0)  # (C,H,W)
-        # print(feat.shape)
+        )  # (height, width), must be a multiple of 64
+        feat = np.expand_dims(feat, axis=0)  # Add channel dimension: (1, H, W)
         return feat
 
     def __len__(self):
+        """Return the number of samples in the dataset.
+
+        Returns:
+            length (int): Number of feature files in the dataset.
+        """
         return len(self.samples)
 
     @staticmethod
     def truncation(feat, trun_low, trun_high):
+        """Truncate feature values to specified range.
+
+        Clips feature values to be within [trun_low, trun_high]. Supports
+        per-channel truncation when trun_low and trun_high are lists.
+
+        Args:
+            feat (numpy.ndarray): Input feature array of shape (N, C, H, W).
+            trun_low (float or list[float]): Lower bound(s) for truncation.
+            trun_high (float or list[float]): Upper bound(s) for truncation.
+
+        Returns:
+            trun_feat (numpy.ndarray): Truncated feature array of the same shape as input.
+        """
         trun_feat = np.zeros_like(feat).astype(np.float32)
         if isinstance(trun_low, list):
             for idx in range(len(trun_low)):
@@ -141,6 +135,21 @@ class FeatureFolder(Dataset):
 
     @staticmethod
     def uniform_quantization(feat, min_v, max_v, bit_depth):
+        """Apply uniform quantization to features.
+
+        Quantizes features to integer values in the range [0, 2^bit_depth - 1]
+        using uniform quantization. Supports per-channel quantization when
+        min_v and max_v are lists.
+
+        Args:
+            feat (numpy.ndarray): Input feature array of shape (N, C, H, W).
+            min_v (float or list[float]): Minimum value(s) for quantization range.
+            max_v (float or list[float]): Maximum value(s) for quantization range.
+            bit_depth (int): Number of bits for quantization (determines quantization levels).
+
+        Returns:
+            quant_feat (numpy.ndarray): Quantized feature array of the same shape as input.
+        """
         quant_feat = np.zeros_like(feat).astype(np.float32)
         if isinstance(min_v, list):
             for idx in range(len(min_v)):
@@ -154,6 +163,21 @@ class FeatureFolder(Dataset):
 
     @staticmethod
     def uniform_dequantization(feat, min_v, max_v, bit_depth):
+        """Apply uniform dequantization to features.
+
+        Converts quantized integer features back to continuous values using
+        uniform dequantization. Supports per-channel dequantization when
+        min_v and max_v are lists.
+
+        Args:
+            feat (numpy.ndarray): Quantized feature array of shape (N, C, H, W).
+            min_v (float or list[float]): Minimum value(s) for dequantization range.
+            max_v (float or list[float]): Maximum value(s) for dequantization range.
+            bit_depth (int): Number of bits used for quantization.
+
+        Returns:
+            dequant_feat (numpy.ndarray): Dequantized feature array of the same shape as input.
+        """
         feat = feat.astype(np.float32)
         dequant_feat = np.zeros_like(feat).astype(np.float32)
         if isinstance(min_v, list):
@@ -167,6 +191,22 @@ class FeatureFolder(Dataset):
 
     @staticmethod
     def packing(feat, model_type):
+        """Pack features according to model type.
+
+        Reshapes features from (N, C, H, W) format to a 2D array format
+        specific to the model type. This is used for compatibility with
+        different model architectures.
+
+        Args:
+            feat (numpy.ndarray): Input feature array of shape (N, C, H, W).
+            model_type (str): Model type. Supported types:
+                - "llama3": Extracts single channel, returns (H, W)
+                - "dinov2": Reshapes to (N*H, C*W)
+                - "sd3": Reshapes to (C/4*H, C/4*W)
+
+        Returns:
+            feat (numpy.ndarray): Packed feature array with shape depending on model_type.
+        """
         N, C, H, W = feat.shape
         if model_type == "llama3":
             feat = feat[0, 0, :, :]
@@ -182,6 +222,22 @@ class FeatureFolder(Dataset):
 
     @staticmethod
     def unpacking(feat, shape, model_type):
+        """Unpack features according to model type.
+
+        Reshapes packed features back to (N, C, H, W) format. This is the
+        inverse operation of packing.
+
+        Args:
+            feat (numpy.ndarray): Packed feature array.
+            shape (tuple[int, int, int, int]): Target shape (N, C, H, W).
+            model_type (str): Model type. Supported types:
+                - "llama3": Expands to (1, 1, H, W)
+                - "dinov2": Reshapes from (N*H, C*W) to (N, C, H, W)
+                - "sd3": Reshapes from (C/4*H, C/4*W) to (N, C, H, W)
+
+        Returns:
+            feat (numpy.ndarray): Unpacked feature array of shape (N, C, H, W).
+        """
         N, C, H, W = shape
         if model_type == "llama3":
             feat = np.expand_dims(feat, axis=0)
@@ -197,7 +253,19 @@ class FeatureFolder(Dataset):
         return feat
 
     @staticmethod
-    def random_crop(feat, crop_shape):  # (hight, width)
+    def random_crop(feat, crop_shape):
+        """Randomly crop a feature array to specified shape.
+
+        Args:
+            feat (numpy.ndarray): Input feature array of shape (H, W).
+            crop_shape (tuple[int, int]): Desired crop size in format (height, width).
+
+        Returns:
+            feat (numpy.ndarray): Cropped feature array of shape crop_shape.
+
+        Raises:
+            ValueError: If crop_shape exceeds the feature dimensions.
+        """
         max_row = feat.shape[0] - crop_shape[0]
         max_col = feat.shape[1] - crop_shape[1]
 
@@ -216,6 +284,20 @@ class FeatureFolder(Dataset):
 
 
 class FeatureDictPerSampleFolder(Dataset):
+    """Dataset for loading feature dictionaries stored as separate .pt files.
+
+    Each sample is stored as a separate PyTorch .pt file containing a dictionary.
+    This is useful when each sample has different keys or when features are
+    preprocessed and saved individually.
+
+    Args:
+        root (str): Root directory of the dataset.
+        transform (callable, optional): A function or transform to apply to each
+            sample. Defaults to None.
+        split (str): Subdirectory name within root (e.g., 'train', 'val').
+            Defaults to "train".
+    """
+
     def __init__(self, root, transform=None, split="train"):
         splitdir = Path(root) / split
 
@@ -223,20 +305,64 @@ class FeatureDictPerSampleFolder(Dataset):
             raise RuntimeError(f'Missing directory "{splitdir}"')
 
         self.samples = sorted(f for f in splitdir.rglob("*.pt") if f.is_file())
+        self.transform = transform
 
     def __len__(self):
+        """Return the number of samples in the dataset.
+
+        Returns:
+            length (int): Number of .pt files in the dataset.
+        """
         return len(self.samples)
 
     def __getitem__(self, idx):
+        """Get a feature dictionary sample from the dataset.
+
+        Args:
+            idx (int): Index of the sample to retrieve.
+
+        Returns:
+            data (dict): Feature dictionary loaded from the .pt file. If transform is
+                provided, the transformed version is returned.
+        """
         file = self.samples[idx]
         with open(file, "rb") as f:
             data = torch.load(f, map_location="cpu", weights_only=True)
+
+        if self.transform:
+            data = self.transform(data)
+
         return data
 
 
 class FeatureDictPerKeyFolder(Dataset):
-    """
-    save each key in a separate folder, only retrieve the data of the specified keys, reduce disk IO usage
+    """Dataset for loading feature dictionaries organized by keys.
+
+    Each key in the feature dictionary is stored in a separate folder. This
+    organization allows loading only the specified keys, reducing disk I/O usage.
+    All keys must have the same number of samples.
+
+    Directory structure:
+
+        root/
+            split/
+                key1/
+                    sample0.pt
+                    sample1.pt
+                    ...
+                key2/
+                    sample0.pt
+                    sample1.pt
+                    ...
+
+    Args:
+        root (str): Root directory of the dataset.
+        split (str): Subdirectory name within root (e.g., 'train', 'val').
+            Defaults to "" (empty string, meaning root itself).
+        keys (list[str], optional): List of keys to load. If None, all keys
+            found in the directory are loaded. Defaults to None.
+        transform (callable, optional): A function or transform to apply to each
+            sample dictionary. Defaults to None.
     """
 
     def __init__(self, root, split="", keys=None, transform=None):
@@ -253,17 +379,33 @@ class FeatureDictPerKeyFolder(Dataset):
             ]
 
         key_lengths = {key: len(self.samples[key]) for key in self.keys}
-        assert len(set(key_lengths.values())) == 1, "所有键的长度必须相同"
+        assert len(set(key_lengths.values())) == 1, "All keys must have the same length"
         self.length = len(self.samples[self.keys[0]])
 
-        print(f"数据集加载成功，共 {self.length} 个样本")
-        print(f"包含的键: {self.keys}")
+        print(f"Dataset loaded successfully, {self.length} samples")
+        print(f"Keys included: {self.keys}")
 
     def __len__(self):
-        """返回数据集大小"""
+        """Return the number of samples in the dataset.
+
+        Returns:
+            length (int): Number of samples (same for all keys).
+        """
         return self.length
 
     def __getitem__(self, idx):
+        """Get a feature dictionary sample from the dataset.
+
+        Loads the idx-th sample for each specified key and combines them into
+        a single dictionary.
+
+        Args:
+            idx (int): Index of the sample to retrieve.
+
+        Returns:
+            data (dict): Dictionary containing all specified keys with their corresponding
+                values. If transform is provided, the transformed version is returned.
+        """
         data = {}
         for key in self.keys:
             with open(self.samples[key][idx], "rb") as f:
@@ -277,9 +419,19 @@ class FeatureDictPerKeyFolder(Dataset):
 
 
 def feature_dict_collate_fn(batch):
-    """
-    自定义collate函数，将多个feature合并成一个大的batch
-    如果是tensor，则拼接；否则取第一个
+    """Custom collate function for feature dictionaries.
+
+    Merges multiple feature dictionaries into a single batch. For each key:
+    - If the value is a torch.Tensor, stacks all values along dimension 0.
+    - If the value is a torch.Size, creates a new Size with batch dimension.
+    - Otherwise, takes the first value.
+
+    Args:
+        batch (list[dict]): List of feature dictionaries to collate.
+
+    Returns:
+        collated (dict): Collated dictionary with the same keys as input, where tensor
+            values are stacked and other values are taken from the first sample.
     """
     collated = {}
     first = batch[0]

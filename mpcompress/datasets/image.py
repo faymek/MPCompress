@@ -5,24 +5,24 @@ import numpy as np
 
 
 class ImageFolder(Dataset):
-    """Load an image folder database. Training and testing image samples
-    are respectively stored in separate directories:
+    """Load an image folder database.
 
-    .. code-block::
+    Training and testing image samples are respectively stored in separate
+    directories:
 
-        - rootdir/
-            - train/
-                - img000.png
-                - img001.png
-            - test/
-                - img000.png
-                - img001.png
+        rootdir/
+            train/
+                img000.png
+                img001.png
+            test/
+                img000.png
+                img001.png
 
     Args:
-        root (string): root directory of the dataset
-        transform (callable, optional): a function or transform that takes in a
-            PIL image and returns a transformed version
-        split (string): split mode ('train' or 'val')
+        root (str): Root directory of the dataset.
+        transform (callable, optional): A function or transform that takes in a
+            PIL image and returns a transformed version. Defaults to None.
+        split (str): Split mode ('train' or 'val'). Defaults to "train".
     """
 
     def __init__(self, root, transform=None, split="train"):
@@ -36,15 +36,23 @@ class ImageFolder(Dataset):
         self.transform = transform
 
     def __len__(self):
+        """Return the number of samples in the dataset.
+
+        Returns:
+            length (int): Number of image files in the dataset.
+        """
         return len(self.samples)
 
     def __getitem__(self, index):
-        """
+        """Get an image sample from the dataset.
+
         Args:
-            index (int): Index
+            index (int): Index of the sample to retrieve.
 
         Returns:
-            img: `PIL.Image.Image` or transformed `PIL.Image.Image`.
+            img (PIL.Image.Image or torch.Tensor): The image. If transform is
+                provided, returns the transformed version (typically a torch.Tensor).
+                Otherwise, returns a PIL Image in RGB format.
         """
         img = Image.open(self.samples[index]).convert("RGB")
         if self.transform:
@@ -53,27 +61,37 @@ class ImageFolder(Dataset):
 
 
 class ClassificationDataset(Dataset):
-    """统一的图像文件夹数据集，支持分类和分割任务"""
+    """Unified image folder dataset for classification tasks.
+
+    This dataset loads images from a directory structure and associates them
+    with classification labels from a labels file. It supports loading images
+    from a file list or by scanning the directory.
+
+    Args:
+        root (str): Root directory of the dataset.
+        transform (callable, optional): Data preprocessing transform function.
+            Defaults to None.
+        split (str): Subset name (e.g., 'train', 'val'). If empty, uses root
+            directory directly. Defaults to "".
+        file_list (str, optional): Path to file list relative to root. Each line
+            should contain a relative path to an image file. If None, scans the
+            directory for image files. Defaults to None.
+        labels_file (str, required): Path to labels file relative to root. Each
+            line should contain "image_name label" where label is an integer.
+            Defaults to None.
+        **kwargs (dict): Additional keyword arguments (unused).
+    """
 
     def __init__(
         self, root, transform=None, split="", file_list=None, labels_file=None, **kwargs
     ):
-        """
-        参数:
-            root (str): 数据集根目录
-            transform (callable, optional): 数据预处理转换
-            split (str): 数据子集名称
-            file_list (str, optional): 文件列表路径，相对于root
-            labels_file (str, optional): 标签文件路径，相对于root
-            seg_map_path (str, optional): 分割标签路径，相对于root
-        """
         self.root = Path(root)
         self.transform = transform
         self.split = split
         self.file_list = file_list
         self.labels_file = labels_file
 
-        # 确定数据目录
+        # Determine data directory
         if self.split:
             self.data_dir = self.root / self.split
         else:
@@ -82,15 +100,15 @@ class ClassificationDataset(Dataset):
         if not self.data_dir.is_dir():
             raise FileNotFoundError(f'Missing directory "{self.data_dir}"')
 
-        # 加载文件列表
+        # Load file list
         if self.file_list and (self.root / self.file_list).exists():
             with open(self.root / self.file_list, "r") as f:
                 self.samples = [line.strip() for line in f.readlines()]
-            # 确保文件路径是相对于data_dir的
+            # Ensure file paths are relative to data_dir
             self.samples = [str(self.data_dir / sample) for sample in self.samples]
             self.samples = sorted(self.samples)
         else:
-            # 如果没有指定file_list，则扫描目录
+            # If file_list is not specified, scan the directory
             self.samples = sorted(
                 f
                 for f in self.data_dir.rglob("*")
@@ -99,7 +117,7 @@ class ClassificationDataset(Dataset):
             )
             self.samples = [str(f) for f in self.samples]
 
-        # 加载标签信息
+        # Load label information
         if not self.labels_file:
             raise ValueError("labels_file is required for classification dataset")
         if not (self.root / self.labels_file).exists():
@@ -114,18 +132,35 @@ class ClassificationDataset(Dataset):
                     self.labels_dict[img_name] = label
 
     def __len__(self):
+        """Return the number of samples in the dataset.
+
+        Returns:
+            length (int): Number of image files in the dataset.
+        """
         return len(self.samples)
 
     def __getitem__(self, index):
-        """返回 (img, img_meta)"""
+        """Get an image sample and its metadata from the dataset.
+
+        Args:
+            index (int): Index of the sample to retrieve.
+
+        Returns:
+            tuple (PIL.Image.Image or torch.Tensor, dict): A tuple containing:
+                - img (PIL.Image.Image or torch.Tensor): The image. If transform
+                    is provided, returns the transformed version (typically a
+                    torch.Tensor). Otherwise, returns a PIL Image in RGB format.
+                - img_meta (dict): Metadata dictionary with keys:
+                    - "img_path" (str): Full path to the image file.
+                    - "img_name" (str): Image filename without extension.
+                    - "ori_size" (tuple): Original image size (width, height) or
+                        (height, width) for tensors.
+                    - "cls_label" (int or None): Classification label for the image.
+        """
         img_path = self.samples[index]
         img_name = Path(img_path).stem
 
-        img = Image.open(img_path).convert("RGB")
-        if self.transform:
-            img = self.transform(img)
-
-        # 加载图像
+        # Load image
         img = Image.open(img_path).convert("RGB")
         if self.transform:
             img = self.transform(img)
@@ -141,6 +176,28 @@ class ClassificationDataset(Dataset):
 
 
 class SegmentationDataset(Dataset):
+    """Dataset for image segmentation tasks.
+
+    This dataset loads images and their corresponding segmentation masks from
+    separate directories. It supports loading images from a file list or by
+    scanning the directory.
+
+    Args:
+        root (str): Root directory of the dataset.
+        transform (callable, optional): Data preprocessing transform function.
+            Defaults to None.
+        img_path (str): Name of the image subdirectory within root.
+            Defaults to "JPEGImages".
+        seg_map_path (str): Name of the segmentation mask subdirectory within root.
+            Defaults to "SegmentationClass".
+        file_list (str, optional): Path to file list relative to root. Each line
+            should contain an image name (without extension). If None, scans the
+            directory for .jpg files. Defaults to None.
+        reduce_zero_label (bool): Whether to reduce zero label. If True, subtracts
+            1 from all labels (2->1, 1->0, 0->255 for uint8). Defaults to False.
+        **kwargs (dict): Additional keyword arguments (unused).
+    """
+
     def __init__(
         self,
         root,
@@ -151,14 +208,6 @@ class SegmentationDataset(Dataset):
         reduce_zero_label=False,
         **kwargs,
     ):
-        """
-        参数:
-            root (str): 数据集根目录
-            transform (callable, optional): 数据预处理转换
-            img_path (str): 图像目录名
-            seg_map_path (str): 分割标签目录名
-            file_list (str, optional): 文件列表路径
-        """
         super().__init__()
 
         self.root = Path(root)
@@ -172,7 +221,7 @@ class SegmentationDataset(Dataset):
         if not img_dir.is_dir():
             raise RuntimeError(f'Missing directory "{img_dir}"')
 
-        # 加载文件列表
+        # Load file list
         if self.file_list and (self.root / self.file_list).exists():
             with open(self.root / self.file_list, "r") as f:
                 self.samples = [line.strip() for line in f.readlines()]
@@ -180,19 +229,41 @@ class SegmentationDataset(Dataset):
                 str(img_dir / f"{img_name}.jpg") for img_name in self.samples
             ]
         else:
-            # 如果没有指定file_list，则扫描目录
+            # If file_list is not specified, scan the directory
             self.samples = sorted(f for f in img_dir.rglob("*.jpg"))
             self.samples = [str(f) for f in self.samples]
 
     def __len__(self):
+        """Return the number of samples in the dataset.
+
+        Returns:
+            length (int): Number of image files in the dataset.
+        """
         return len(self.samples)
 
     def __getitem__(self, index):
-        """返回 (img, img_meta)"""
+        """Get an image sample and its segmentation mask from the dataset.
+
+        Args:
+            index (int): Index of the sample to retrieve.
+
+        Returns:
+            tuple (PIL.Image.Image or torch.Tensor, dict): A tuple containing:
+                - img (PIL.Image.Image or torch.Tensor): The image. If transform
+                    is provided, returns the transformed version (typically a
+                    torch.Tensor). Otherwise, returns a PIL Image in RGB format.
+                - img_meta (dict): Metadata dictionary with keys:
+                    - "img_path" (str): Full path to the image file.
+                    - "img_name" (str): Image filename without extension.
+                    - "ori_size" (tuple): Original image size (width, height) or
+                        (height, width) for tensors.
+                    - "seg_label_path" (str): Full path to the segmentation mask file.
+                    - "seg_label" (numpy.ndarray): Segmentation mask as int64 array.
+        """
         img_path = self.samples[index]
         img_name = Path(img_path).stem
 
-        # 加载图像
+        # Load image
         img = Image.open(img_path).convert("RGB")
         if self.transform:
             img = self.transform(img)
@@ -200,7 +271,8 @@ class SegmentationDataset(Dataset):
         seg_label_path = str(self.root / self.seg_map_path / f"{img_name}.png")
         seg_label = np.array(Image.open(seg_label_path))
         if self.reduce_zero_label:
-            seg_label = seg_label - 1  # for uint8, 2->1, 1->0, 0->255
+            # For uint8: 2->1, 1->0, 0->255
+            seg_label = seg_label - 1
         seg_label = seg_label.astype(np.int64)
 
         img_meta = {
@@ -215,8 +287,19 @@ class SegmentationDataset(Dataset):
 
 
 class PascalVOCDataset(SegmentationDataset):
-    """Pascal VOC dataset.
-    From https://github.com/open-mmlab/mmsegmentation/blob/main/mmseg/datasets/voc.py
+    """Pascal VOC dataset for semantic segmentation.
+
+    This dataset implements the Pascal VOC 2012 dataset format with 21 classes
+    (including background). The dataset structure follows the standard VOC format
+    with images in JPEGImages and segmentation masks in SegmentationClass.
+
+    Reference:
+        https://github.com/open-mmlab/mmsegmentation/blob/main/mmseg/datasets/voc.py
+
+    Attributes:
+        METAINFO (dict): Dataset metadata containing:
+            - classes (tuple): Tuple of 21 class names including 'background'.
+            - palette (list): List of RGB color values for visualization.
     """
 
     METAINFO = dict(
@@ -232,15 +315,30 @@ class PascalVOCDataset(SegmentationDataset):
                  [0, 64, 128]])
 
     def __init__(self, **kwargs) -> None:
+        """Initialize Pascal VOC dataset.
+
+        Args:
+            **kwargs: Arguments passed to :class:`SegmentationDataset`. See
+                :meth:`SegmentationDataset.__init__` for details.
+        """
         super().__init__(**kwargs)
 
 
 class ADE20KDataset(SegmentationDataset):
-    """ADE20K dataset.
-    From https://github.com/open-mmlab/mmsegmentation/blob/main/mmseg/datasets/ade.py
+    """ADE20K dataset for semantic segmentation.
 
-    In segmentation map annotation for ADE20K, 0 stands for background, which
-    is not included in 150 categories. ``reduce_zero_label`` is fixed to True.
+    This dataset implements the ADE20K dataset format with 150 semantic classes.
+    In the segmentation map annotation for ADE20K, 0 stands for background, which
+    is not included in the 150 categories. Therefore, ``reduce_zero_label`` is
+    fixed to True by default.
+
+    Reference:
+        https://github.com/open-mmlab/mmsegmentation/blob/main/mmseg/datasets/ade.py
+
+    Attributes:
+        METAINFO (dict): Dataset metadata containing:
+            - classes (tuple): Tuple of 150 class names.
+            - palette (list): List of RGB color values for visualization.
     """
 
     METAINFO = dict(
@@ -311,4 +409,13 @@ class ADE20KDataset(SegmentationDataset):
                  [184, 255, 0], [0, 133, 255], [255, 214, 0], [25, 194, 194],
                  [102, 255, 0], [92, 0, 255]])
     def __init__(self, reduce_zero_label=True, **kwargs):
+        """Initialize ADE20K dataset.
+
+        Args:
+            reduce_zero_label (bool): Whether to reduce zero label. Fixed to True
+                for ADE20K since 0 represents background not in 150 categories.
+                Defaults to True.
+            **kwargs: Additional arguments passed to :class:`SegmentationDataset`.
+                See :meth:`SegmentationDataset.__init__` for details.
+        """
         super().__init__(reduce_zero_label=reduce_zero_label, **kwargs)
