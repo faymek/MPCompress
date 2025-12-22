@@ -1,0 +1,1 @@
+::: mpcompress.latent_codecs
