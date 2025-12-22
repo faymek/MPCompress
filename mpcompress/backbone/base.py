@@ -8,11 +8,22 @@ from mpcompress.backbone.vqgan.vq_model import VQModel  # type: ignore
 
 
 def parse_dtype(dtype):
-    """将字符串或torch.dtype转换为torch.dtype对象"""
+    """Convert string or torch.dtype to torch.dtype object.
+
+    Args:
+        dtype (str or torch.dtype): Data type to parse. Can be a string like "float32",
+                                   "torch.float16", etc., or a torch.dtype object.
+
+    Returns:
+        torch.dtype: The parsed torch.dtype object.
+
+    Raises:
+        ValueError: If dtype is not a supported string format or torch.dtype.
+    """
     if isinstance(dtype, torch.dtype):
         return dtype
     elif isinstance(dtype, str):
-        # 支持常见的字符串格式
+        # Support common string formats
         dtype_mapping = {
             "torch.float": torch.float,
             "torch.float32": torch.float32,
@@ -32,26 +43,56 @@ def parse_dtype(dtype):
             return dtype_mapping[dtype]
         else:
             raise ValueError(
-                f"不支持的数据类型: {dtype}. 支持的类型: {list(dtype_mapping.keys())}"
+                f"Unsupported data type: {dtype}. Supported types: {list(dtype_mapping.keys())}"
             )
     else:
         raise ValueError(
-            f"autocast_dtype 必须是字符串或 torch.dtype，得到: {type(dtype)}"
+            f"autocast_dtype must be a string or torch.dtype, got: {type(dtype)}"
         )
 
 
 class VqganBackbone(nn.Module):
+    """VQGAN-based backbone for image encoding and decoding.
+
+    This backbone uses a VQGAN (Vector Quantized Generative Adversarial Network) model
+    to encode images into discrete tokens and decode them back to images. The encoding
+    process converts images to latent codes and quantizes them using a codebook.
+
+    Args:
+        vqgan_config (dict): Configuration dictionary for the VQModel initialization.
+        **kwargs (dict): Unused keyword arguments for API compatibility.
+
+    Attributes:
+        vqgan (VQModel): The underlying VQGAN model.
+        codebook_size (int): Size of the quantization codebook.
+    """
+
     def __init__(self, vqgan_config, **kwargs):
         super().__init__()
         self.vqgan = VQModel(**vqgan_config)
         self.codebook_size = self.vqgan.quantize.embedding.weight.size()[0]
 
     def encode(self, x):
-        # x: (B, 3, H, W), (0, 1) range
-        # note that: original VQGAN accept (-1,1) range
-        # note that: z_q' = z + (z_q - z).detach()
-        # this incurs a small MSE(z_q', z_q) = 1e-18
-        # so we use z_q as the context
+        """Encode input images into latent codes and tokens.
+
+        The input images x are expected to be in the range [0, 1], which are then
+        transformed to [-1, 1] for the VQGAN encoder. The encoder produces latent
+        codes that are quantized using the codebook to produce discrete tokens.
+        The quantization process produces z_q' = z + (z_q - z).detach(), which
+        incurs a small MSE error (approximately 1e-18) between z_q' and z_q. We
+        use z_q as the context for consistency.
+
+        Args:
+            x (torch.Tensor): Input images of shape (B, 3, H, W) in range [0, 1].
+
+        Returns:
+            vqgan_enc (dict): A dictionary containing:
+
+                - "z" (torch.Tensor): Continuous latent codes before quantization.
+                - "z_q" (torch.Tensor): Quantized latent codes of shape (B, C, H, W).
+                - "tokens" (torch.Tensor): Discrete token indices of shape (B, H, W).
+                - "shape" (tuple): Spatial dimensions (H, W) of the latent representation.
+        """
         z = self.vqgan.quant_conv(self.vqgan.encoder(2 * x - 1))
         z_q_prime, _, (_, _, idxs_1d) = self.vqgan.quantize(z)
         B, C, H, W = z_q_prime.shape
@@ -61,12 +102,28 @@ class VqganBackbone(nn.Module):
         return {"z": z, "z_q": z_q, "tokens": tokens, "shape": (H, W)}
 
     def tokens_to_features(self, tokens):
+        """Convert discrete tokens to quantized latent features.
+
+        Args:
+            tokens (torch.Tensor): Discrete token indices of shape (B, H, W).
+
+        Returns:
+            z_q (torch.Tensor): Quantized latent features of shape (B, C, H, W).
+        """
         B, H, W = tokens.shape
         z_q = self.vqgan.quantize.embedding(tokens.flatten())
         z_q = rearrange(z_q, "(B H W) C -> B C H W", B=B, H=H, W=W)
         return z_q
 
     def decode(self, z_q):
+        """Decode quantized latent codes back to images.
+
+        Args:
+            z_q (torch.Tensor): Quantized latent codes of shape (B, C, H, W).
+
+        Returns:
+            x_hat (torch.Tensor): Reconstructed images of shape (B, 3, H, W) in range [0, 1].
+        """
         x_hat = self.vqgan.decode(z_q)
         x_hat = (x_hat + 1) / 2
         return x_hat
@@ -76,6 +133,12 @@ class Dinov2TimmBackbone(nn.Module):
     """
     This class extends the DINOv2 model to provide flexible feature extraction.
     The DINOv2 backbone implemented with timm supports variable patch sizes and dynamic input image sizes.
+    The `slot` parameter determines the splitting point for dividing the ViT blocks into:
+
+    * encode part: blocks[:slot],
+    * decode part: blocks[slot:]
+
+    Intermediate feature are extracted after the encode part and before the decode part.
 
     Args:
         model_size (str): Model variant specification ('small', 'base', 'large', 'giant'). Defaults to 'small'.
@@ -86,21 +149,12 @@ class Dinov2TimmBackbone(nn.Module):
                    Defaults to -4.
         n_last_blocks (int): Number of final blocks to utilize for feature aggregation. Defaults to 4.
         ckpt_path (str, optional): Path to pre-trained checkpoint for initialization. Defaults to None.
-        autocast_dtype (str or torch.dtype): Data type for autocast mixed precision.
+        cast_dtype (str or torch.dtype): Data type for autocast mixed precision.
                    Supports string format like "torch.float", "torch.float16", "float32", etc.
                    Defaults to "torch.float".
         device (str): Device to run the model on. Defaults to "cuda" if available, else "cpu".
+        with_registers (bool): Whether to use register tokens in the model. Defaults to False.
 
-    Note:
-        The `slot` parameter determines the splitting point for dividing the network blocks into:
-        - Front part: blocks[:slot]
-        - Back part: blocks[slot:]
-
-        For example, with slot = -4 and blocks = [0,1,2,3,4,5,6,7,8,9]:
-        - Front part: blocks[:-4] = [0,1,2,3,4,5]
-        - Back part: blocks[-4:] = [6,7,8,9]
-
-        Intermediate feature are extracted after the front part and before the back part.
     """
 
     def __init__(
@@ -113,7 +167,7 @@ class Dinov2TimmBackbone(nn.Module):
         n_last_blocks=4,  # number of last blocks to take
         ckpt_path=None,
         device="cuda" if torch.cuda.is_available() else "cpu",
-        cast_dtype="float",  # 使用 autocast 的数据类型，支持字符串配置
+        cast_dtype="float",  # Data type for autocast, supports string configuration
         with_registers=False,
     ):
         super().__init__()
@@ -156,6 +210,15 @@ class Dinov2TimmBackbone(nn.Module):
         return feature_model
 
     def forward(self, x, task="whole"):
+        """Forward pass through the backbone.
+
+        Args:
+            x (torch.Tensor): Input images of shape (B, 3, H, W).
+            task (str): Task type, one of ["whole", "cls", "seg"]. Defaults to "whole".
+
+        Returns:
+            feats (list[torch.Tensor]): Output features, format depends on task.
+        """
         assert task in ["whole", "cls", "seg"]
         with torch.inference_mode():
             h = self.encode(x)
@@ -164,6 +227,19 @@ class Dinov2TimmBackbone(nn.Module):
             return h
 
     def encode(self, x):
+        """Encode input images through the encoder part of the DINOv2 model.
+
+        The encoding process applies input normalization, patch embedding, positional
+        embedding, and processes the input through the first `slot` transformer blocks.
+        The intermediate features are extracted after the encoder part and before
+        the decoder part.
+
+        Args:
+            x (torch.Tensor): Input images of shape (B, 3, H, W).
+
+        Returns:
+            h (torch.Tensor): Encoded features after the encoder blocks.
+        """
         dino = self.model
         with torch.autocast(device_type=self.device_type, dtype=self.cast_dtype):
             x = self.input_transform(x)
@@ -176,6 +252,22 @@ class Dinov2TimmBackbone(nn.Module):
         return x
 
     def decode(self, h, token_res=None, task="whole"):
+        """Decode encoded features through the decoder part of the DINOv2 model.
+
+        Args:
+            h (torch.Tensor): Encoded features from the encoder.
+            token_res (tuple, optional): Token resolution (H, W) for reshaping patch tokens.
+                                        Defaults to None.
+            task (str): Decoding task type. Must be one of:
+
+                - "whole": Return full token sequences from multiple layers.
+                - "cls": Return class tokens and patch tokens separately.
+                - "seg": Return patch tokens reshaped to 2D spatial format.
+                Defaults to "whole".
+
+        Returns:
+            feats (list[torch.Tensor, ...]): Decoded features, format depends on task.
+        """
         if task == "whole":
             return self.decode_whole(h, token_res=token_res)
         elif task == "cls":
@@ -226,7 +318,7 @@ class Dinov2TimmBackbone(nn.Module):
             # input feature is just needed
             multi_outputs.append(x)
 
-        # 使用 autocast 进行混合精度计算
+        # Use autocast for mixed precision computation
         with torch.autocast(device_type=self.device_type, dtype=self.cast_dtype):
             for i in range(curr_layer + 1, total_layers):
                 x = dino.blocks[i](x)
@@ -293,6 +385,31 @@ class Dinov2TimmBackbone(nn.Module):
 
 
 class Dinov2OrgBackbone(nn.Module):
+    """DINOv2 backbone using the original Facebook Research implementation.
+
+    This class extends the original DINOv2 model to provide flexible feature extraction.
+    The `slot` parameter determines the splitting point for dividing the ViT blocks into:
+
+    * encode part: blocks[:slot],
+    * decode part: blocks[slot:]
+
+    Intermediate features are extracted after the encode part and before the decode part.
+
+    Args:
+        model_size (str): Model variant specification ('small', 'base', 'large', 'giant').
+                         Defaults to 'small'.
+        img_size (int): Base input image size. Defaults to 256.
+        patch_size (int): Patch embedding size. Defaults to 16.
+        dynamic_size (bool): Whether to support dynamically varying input sizes.
+                            Defaults to False.
+        slot (int): Block slicing position for feature extraction. Follows Python list
+                   slicing conventions. -4 means the last 4th block. Defaults to -4.
+        n_last_blocks (int): Number of final blocks to utilize for feature aggregation.
+                            Defaults to 4.
+        ckpt_path (str, optional): Path to pre-trained checkpoint for initialization.
+                                  Defaults to None.
+    """
+
     def __init__(
         self,
         model_size="small",
@@ -371,14 +488,34 @@ class Dinov2OrgBackbone(nn.Module):
         return model
 
     def forward(self, x, task="whole"):
+        """Forward pass through the backbone.
+
+        Args:
+            x (torch.Tensor): Input images of shape (B, 3, H, W).
+            task (str): Task type, one of ["whole", "cls", "seg"]. Defaults to "whole".
+
+        Returns:
+            feats (list[torch.Tensor, ...]): Output features, format depends on task.
+        """
         assert task in ["whole", "cls", "seg"]
         with torch.inference_mode():
-            h = self.encode(x, self.slot)
+            h = self.encode(x)
             token_res = (x.size(2) // self.patch_size, x.size(3) // self.patch_size)
             h = self.decode(h, token_res=token_res, task=task)
             return h
 
     def encode(self, x):
+        """Encode input images through the encoder part of the DINOv2 model.
+
+        The encoding process applies input normalization, prepares tokens with masks,
+        and processes the input through the first `slot` transformer blocks.
+
+        Args:
+            x (torch.Tensor): Input images of shape (B, 3, H, W).
+
+        Returns:
+            h (torch.Tensor): Encoded features after the encoder blocks.
+        """
         dino = self.model
         x = self.input_transform(x)
         x = dino.prepare_tokens_with_masks(x)
@@ -387,6 +524,22 @@ class Dinov2OrgBackbone(nn.Module):
         return x
 
     def decode(self, h, token_res=None, task="whole"):
+        """Decode encoded features through the decoder part of the DINOv2 model.
+
+        Args:
+            h (torch.Tensor): Encoded features from the encoder.
+            token_res (tuple, optional): Token resolution (H, W) for reshaping patch tokens.
+                                        Defaults to None.
+            task (str): Decoding task type. Must be one of:
+
+                - "whole": Return full token sequences from multiple layers.
+                - "cls": Return class tokens and patch tokens separately.
+                - "seg": Return patch tokens reshaped to 2D spatial format.
+                Defaults to "whole".
+
+        Returns:
+            feats (list[torch.Tensor, ...]): Decoded features, format depends on task.
+        """
         if task == "whole":
             return self.decode_whole(h, token_res=token_res)
         elif task == "cls":
@@ -486,6 +639,20 @@ class Dinov2OrgBackbone(nn.Module):
         )
 
     def slide_encode(self, img, slide_window, slide_stride):
+        """Encode images using sliding window approach.
+
+        This method extracts features from overlapping image crops using a sliding
+        window strategy. Useful for processing large images that don't fit in memory
+        or for extracting features at multiple scales.
+
+        Args:
+            img (torch.Tensor): Input image of shape (B, 3, H_img, W_img).
+            slide_window (tuple): Window size for cropping (h_crop, w_crop).
+            slide_stride (tuple): Stride for sliding window (h_stride, w_stride).
+
+        Returns:
+            multi_crop_feats (list[torch.Tensor]): List of encoded features, one for each crop.
+        """
         h_crop, w_crop = slide_window
         h_stride, w_stride = slide_stride
         _, _, h_img, w_img = img.shape
@@ -510,4 +677,13 @@ class Dinov2OrgBackbone(nn.Module):
         return multi_crop_features
 
     def slide_decode_seg(self, feature_list, slide_res):
+        """Decode features from sliding window encoding for segmentation task.
+
+        Args:
+            feature_list (list): List of encoded features from slide_encode.
+            slide_res (tuple): Token resolution (H, W) for each crop.
+
+        Returns:
+            multi_crop_feats (list[list[torch.Tensor, ...]]): List of decoded segmentation features, one for each crop.
+        """
         return [self.decode_seg(h[0], token_res=slide_res) for h in feature_list]
