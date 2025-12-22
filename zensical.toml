@@ -1,0 +1,119 @@
+[project]
+site_name = "MPCompress"
+repo_name = "faymek/MPCompress"
+repo_url = "https://github.com/faymek/MPCompress"
+site_url = "https://faymek.github.io/MPCompress"
+
+nav = [
+  {"Home" = "index.md"},
+  {"Framework" = "framework.md"},
+  {"API Reference" = [
+    "api/models.md",
+    "api/backbone.md",
+    "api/latent_codecs.md",
+    "api/token_codecs.md",
+    "api/heads.md",
+    "api/layers.md",
+    "api/datasets.md",
+    "api/losses.md",
+    "api/metrics.md",
+    {"utils" = [
+      "api/utils/utils.md",
+      "api/utils/transforms.md",
+      "api/utils/tensor_ops.md",
+      "api/utils/stream_helper.md",
+      "api/utils/debug.md",
+    ]}
+  ]}
+]
+
+[project.theme]
+features = [
+  "navigation.tabs",
+  "navigation.sections",
+  "navigation.top",
+  "navigation.tracking",
+  "navigation.path",
+  # "navigation.instant",
+  # "navigation.instant.prefetch",
+  "search.highlight"
+]
+
+[project.markdown_extensions.pymdownx.superfences]
+custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" }
+]
+
+[project.plugins.mkdocstrings.handlers.python]
+inventories = ["https://docs.python.org/3/objects.inv"]
+paths = ["src"]
+enable_inventory = true
+
+[project.plugins.mkdocstrings.handlers.python.options]
+docstring_style = "google"
+show_source = false
+
+docstring_options = { "ignore_init_summary" = true }
+
+# MEMBERS ----------------------------------------------------------------
+# Only render pulic symbols.
+# filters = "public"  # Sponsors only!
+# Comment the option otherwise to get the default filters.
+
+# Show class inherited members.
+inherited_members = true
+
+# Render auto-generated summaries of attributes, functions, etc.
+# at the start of each symbol's documentation.
+# summary = true
+
+# HEADINGS ---------------------------------------------------------------
+# For auto-generated pages, one module per page,
+# make the module heading be the H1 heading of the page.
+heading_level = 1
+
+# Render headings for parameters, making them linkable.
+parameter_headings = false
+
+# Render headings for type parameters too.
+type_parameter_headings = false
+
+# Always show the heading for the symbol you render with `::: id`.
+show_root_heading = true
+
+# Only show the name of the symbols you inject render `::: id`.
+show_root_full_path = true
+
+# Show the type of symbol (class, function, etc.) in the heading.
+show_symbol_type_heading = true
+
+# Show the type of symbol (class, function, etc.) in the table of contents.
+show_symbol_type_toc = true
+
+# SIGNATURES -------------------------------------------------------------
+# Format code to 80 + 10% margin (Black and Ruff defaults)
+# in signatures and attribute value code blocks.
+# Needs Black/Ruff installed.
+line_length = 88
+
+# Merge signature and docstring of `__init__` methods
+# into their parent class signature and docstring.
+merge_init_into_class = true
+
+# Render signatures and attribute values in a separate code block,
+# below the symbol heading.
+separate_signature = true
+
+# Show type annotations in signatures.
+show_signature_annotations = true
+
+# Show type parameters in signatures.
+show_signature_type_parameters = true
+
+# OTHER ------------------------------------------------------------------
+# Show backlinks to other documentation sections within each symbol.
+# backlinks = "tree"  # Sponsors only!
+
+# Show base classes OR inheritance diagram.
+show_bases = false
+# show_inheritance_diagram = true  # Sponsors only!
