@@ -12,6 +12,21 @@ def resize(
     align_corners=None,
     warning=True,
 ):
+    """Resize input tensor using interpolation.
+
+    Args:
+        input (torch.Tensor): Input tensor to resize. Expected shape is (N, C, H, W).
+        size (tuple[int, int], optional): Target size (height, width). Defaults to None.
+        scale_factor (float or tuple[float, float], optional): Multiplier for spatial size.
+            Defaults to None.
+        mode (str): Interpolation mode. Options: 'nearest', 'bilinear', 'area', etc.
+            Defaults to "nearest".
+        align_corners (bool, optional): Whether to align corners. Defaults to None.
+        warning (bool): Whether to show alignment warnings. Defaults to True.
+
+    Returns:
+        output (torch.Tensor): Resized tensor.
+    """
     if warning:
         if size is not None and align_corners:
             input_h, input_w = tuple(int(x) for x in input.shape[2:])
@@ -32,7 +47,21 @@ def resize(
 
 
 class Dinov2ClassifierHead(nn.Module):
+    """Classification head for DINOv2 model.
+
+    This head takes multi-layer features from DINOv2 backbone and produces
+    classification logits. Supports 1-layer and 4-layer configurations.
+    """
+
     def __init__(self, embed_dim, layers, checkpoint_path):
+        """Initialize the classifier head.
+
+        Args:
+            embed_dim (int): Embedding dimension of the features.
+            layers (int): Number of layers to use. Supported values: 1, 4.
+            checkpoint_path (str or None): Path to checkpoint file to load weights from.
+                If None, weights are randomly initialized.
+        """
         super().__init__()
         self.layers = layers
         self.linear_head = nn.Linear((1 + layers) * embed_dim, 1_000)
@@ -42,7 +71,18 @@ class Dinov2ClassifierHead(nn.Module):
             self.linear_head.load_state_dict(state_dict, strict=True)
 
     def forward(self, feature_list):
-        # feature list: [[cls token, patch tokens], ..., [cls token, patch tokens]]
+        """Forward pass through the classifier head.
+
+        Args:
+            feature_list (list[list[torch.Tensor]]): List of layer features, where each
+                element is [cls_token, patch_tokens]. Shape:
+
+                - cls_token: (B, embed_dim)
+                - patch_tokens: (B, N_patches, embed_dim)
+
+        Returns:
+            logits (torch.Tensor): Classification logits of shape (B, 1000).
+        """
         x = feature_list
         if self.layers == 1:
             linear_input = torch.cat(
@@ -68,6 +108,16 @@ class Dinov2ClassifierHead(nn.Module):
         return self.linear_head(linear_input)
 
     def predict(self, feature_list, topk=1):
+        """Predict top-k class indices from features.
+
+        Args:
+            feature_list (list[list[torch.Tensor]]): List of layer features, where each
+                element is [cls_token, patch_tokens].
+            topk (int): Number of top predictions to return. Defaults to 1.
+
+        Returns:
+            indices (torch.Tensor): Top-k class indices of shape (B, topk).
+        """
         logits = self.forward(feature_list)
         preds = F.softmax(logits, dim=1)
         values, indices = torch.topk(preds, topk, dim=1)
@@ -75,7 +125,12 @@ class Dinov2ClassifierHead(nn.Module):
 
 
 class Dinov2SegmentationHead(nn.Module):
-    """Batchnorm + Conv"""
+    """Segmentation head for DINOv2 model.
+
+    This head consists of BatchNorm and Conv layers to produce segmentation
+    predictions from multi-level features. Supports various input transformation
+    modes and sliding window inference for large images.
+    """
 
     def __init__(
         self,
@@ -91,6 +146,25 @@ class Dinov2SegmentationHead(nn.Module):
         checkpoint=None,
         **kwargs,
     ):
+        """Initialize the segmentation head.
+
+        Args:
+            in_channels (int or Sequence[int]): Number of input channels.
+            in_index (int or Sequence[int]): Indices of input features to use.
+            input_transform (str or None): Transformation type of input features.
+                Options: 'resize_concat', 'multiple_select', None.
+            channels (int): Number of channels after transformation.
+            resize_factors (Sequence[float], optional): Resize factors for each input.
+                Defaults to None.
+            align_corners (bool): Whether to align corners in interpolation.
+                Defaults to False.
+            num_classes (int): Number of segmentation classes. Defaults to 21.
+            patch_size (int): Patch size of the vision transformer. Defaults to 16.
+            dropout_ratio (float): Dropout ratio. Defaults to 0.
+            checkpoint (str, optional): Path to checkpoint file to load weights from.
+                Defaults to None.
+            **kwargs (dict): Additional keyword arguments passed to parent class.
+        """
         super().__init__(**kwargs)
         self.in_channels = in_channels
         self.in_index = in_index
@@ -117,7 +191,7 @@ class Dinov2SegmentationHead(nn.Module):
     def _transform_inputs(self, inputs):
         """Transform inputs for decoder.
         Args:
-            inputs (list[Tensor]): List of multi-level img features.
+            inputs (list[torch.Tensor]): List of multi-level img features.
 
             in_channels (int|Sequence[int]): Input channels.
             in_index (int|Sequence[int]): Input feature index.
@@ -130,7 +204,7 @@ class Dinov2SegmentationHead(nn.Module):
                     a list and passed into decode head.
                 None: Only one select feature map is allowed.
         Returns:
-            Tensor: The transformed inputs
+            inputs (torch.Tensor): The transformed inputs
         """
 
         if self.input_transform == "resize_concat":
@@ -184,7 +258,15 @@ class Dinov2SegmentationHead(nn.Module):
         return inputs
 
     def forward(self, inputs):
-        """Forward function."""
+        """Forward pass through the segmentation head.
+
+        Args:
+            inputs (list[torch.Tensor] or torch.Tensor): Input features from backbone.
+                Can be a list of multi-level features or a single tensor.
+
+        Returns:
+            seg_logits (torch.Tensor): Segmentation logits of shape (B, num_classes, H, W).
+        """
         x = self._transform_inputs(inputs)
         x = self.bn(x)
         if self.dropout is not None:
@@ -193,6 +275,18 @@ class Dinov2SegmentationHead(nn.Module):
         return x
 
     def predict(self, inputs, scale=1, size=None):
+        """Predict segmentation logits with optional resizing.
+
+        Args:
+            inputs (list[torch.Tensor] or torch.Tensor): Input features from backbone.
+            scale (float): Scale factor for resizing output. If scale != 1, output
+                will be resized by this factor. Defaults to 1.
+            size (tuple[int, int], optional): Target size (height, width) for resizing.
+                If provided, output will be resized to this size. Defaults to None.
+
+        Returns:
+            seg_logits (torch.Tensor): Segmentation logits of shape (B, num_classes, H, W).
+        """
         seg_logits = self.forward(inputs)
         _, _, tok_h, tok_w = seg_logits.shape
         if scale != 1:
@@ -212,9 +306,28 @@ class Dinov2SegmentationHead(nn.Module):
             )
         return seg_logits
 
-    def slide_predict(self, feature_list, current_size, slide_window, slide_stride, target_size=None):
-        # feature_list: [[(B,C,H,W), ...], ..., [(B,C,H,W), ...]], 
-        # which is N_Crop times N_Layer of features
+    def slide_predict(
+        self, feature_list, current_size, slide_window, slide_stride, target_size=None
+    ):
+        """Perform sliding window prediction for large images.
+
+        This method processes an image in overlapping crops using a sliding window
+        approach and averages predictions in overlapping regions.
+
+        Args:
+            feature_list (list[list[torch.Tensor]]): List of crop features, where each
+                crop contains features from multiple layers. Shape:
+                [[(B,C,H,W), ...], ..., [(B,C,H,W), ...]]
+                which is N_crop times N_layer of features.
+            current_size (tuple[int, int]): Current image size (height, width).
+            slide_window (tuple[int, int]): Sliding window size (height, width).
+            slide_stride (tuple[int, int]): Sliding window stride (height, width).
+            target_size (tuple[int, int], optional): Target size for final output.
+                If None, output will be at current_size. Defaults to None.
+
+        Returns:
+            preds (torch.Tensor): Averaged segmentation logits of shape (B, num_classes, H, W).
+        """
         device = next(self.conv_seg.parameters()).device
         h_img, w_img = current_size
         h_stride, w_stride = slide_stride
@@ -228,7 +341,9 @@ class Dinov2SegmentationHead(nn.Module):
 
         i = 0
         for h_idx in range(0, max(h_img - h_crop + h_stride - 1, 0) // h_stride + 1):
-            for w_idx in range(0, max(w_img - w_crop + w_stride - 1, 0) // w_stride + 1):
+            for w_idx in range(
+                0, max(w_img - w_crop + w_stride - 1, 0) // w_stride + 1
+            ):
                 y1 = h_idx * h_stride
                 x1 = w_idx * w_stride
                 y2 = min(y1 + h_crop, h_img)
@@ -236,9 +351,7 @@ class Dinov2SegmentationHead(nn.Module):
                 y1 = max(y2 - h_crop, 0)
                 x1 = max(x2 - w_crop, 0)
 
-                crop_seg_logit = self.predict(
-                    feature_list[i], size=(h_crop, w_crop)
-                )
+                crop_seg_logit = self.predict(feature_list[i], size=(h_crop, w_crop))
                 preds += F.pad(
                     crop_seg_logit, (x1, preds.shape[3] - x2, y1, preds.shape[2] - y2)
                 )
@@ -255,4 +368,3 @@ class Dinov2SegmentationHead(nn.Module):
                 align_corners=self.align_corners,
             )
         return preds
-
