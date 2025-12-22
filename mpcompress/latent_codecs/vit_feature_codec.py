@@ -38,6 +38,23 @@ class ChannelGroupsLatentCodecContiguous(ChannelGroupsLatentCodec):
 
 @register_model("VitUnionLatentCodec")
 class VitUnionLatentCodec(CompressionModel):
+    """Vit-based latent codec with joint modeling of cls token and patch tokens.
+
+    This codec takes ViT features as input and compresses the 2D patch tokens
+    using a hyperprior + space-channel context model (SCCTX) as in [He2022].
+    It reconstructs the ViT feature map and re-injects learned register tokens
+    before passing through transformer blocks.
+
+    Args:
+        h_dim (int): Channel dimension of ViT features.
+        y_dim (int): Channel dimension of primary latent representation ``y``.
+        z_dim (int): Channel dimension of hyperprior latent representation ``z``.
+        groups (int or list[int]): Channel groups for channel-wise context modeling.
+            If int, the channels are evenly split; if list, must sum to ``y_dim``.
+        num_prefix_tokens (int): Number of prefix/register tokens in the ViT feature.
+        **kwargs (dict): Extra keyword arguments for compatibility (unused).
+    """
+
     def __init__(
         self,
         h_dim=384,
@@ -58,7 +75,9 @@ class VitUnionLatentCodec(CompressionModel):
         self.z_dim = z_dim
 
         self.num_prefix_tokens = num_prefix_tokens
-        self.post_reg_tokens = nn.Parameter(torch.zeros(num_prefix_tokens, h_dim), requires_grad=True)
+        self.post_reg_tokens = nn.Parameter(
+            torch.zeros(num_prefix_tokens, h_dim), requires_grad=True
+        )
         self.pre_vit_blocks = nn.Sequential(
             *[Block(dim=h_dim, num_heads=h_dim // 64, mlp_ratio=4) for _ in range(2)]
         )
@@ -162,10 +181,25 @@ class VitUnionLatentCodec(CompressionModel):
         )
 
     def forward(self, h, token_res, **kwargs):
-        # h: vit output tensor (B,L,C)
-        # can be split into 1d cls token and 2d patch tokens
+        """Forward pass for end-to-end rate–distortion training.
+
+        Args:
+            h (torch.Tensor): ViT output tensor of shape ``(B, L, C)`` containing
+                prefix tokens and patch tokens.
+            token_res (tuple[int, int]): Spatial token resolution ``(H, W)`` such that
+                ``L = num_prefix_tokens + H * W``.
+            **kwargs (dict): Unused keyword arguments for API compatibility.
+
+        Returns:
+            out (dict): A dictionary with keys:
+
+                - ``\"h_hat\"`` (torch.Tensor): Reconstructed ViT features of shape
+                  ``(B, L, C)``.
+                - ``\"likelihoods\"`` (dict): Per-latent likelihoods with keys
+                  ``\"y\"`` and ``\"z\"``.
+        """
         B = h.shape[0]
-        h = self.pre_vit_blocks(h)[:, self.num_prefix_tokens:].contiguous()
+        h = self.pre_vit_blocks(h)[:, self.num_prefix_tokens :].contiguous()
         h = rearrange(h, "B (H W) C -> B C H W", H=token_res[0], W=token_res[1])
         y = self.f_a(h)
         hyper_out = self.hyper_lc(y)
@@ -186,7 +220,22 @@ class VitUnionLatentCodec(CompressionModel):
         }
 
     def compress(self, h, token_res, **kwargs):
-        h = self.pre_vit_blocks(h)[:, self.num_prefix_tokens:].contiguous()
+        """Compress ViT features into entropy-coded bitstreams.
+
+        Args:
+            h (torch.Tensor): ViT output tensor of shape ``(B, L, C)``.
+            token_res (tuple[int, int]): Spatial token resolution ``(H, W)``.
+            **kwargs (dict): Unused keyword arguments for API compatibility.
+
+        Returns:
+            out (dict): A dictionary with keys:
+
+                - ``\"strings\"`` (dict): Entropy-coded bitstreams for ``\"y\"`` and
+                  ``\"z\"``.
+                - ``\"pstate\"`` (dict): Side information needed for decoding, including
+                  shapes and token resolution.
+        """
+        h = self.pre_vit_blocks(h)[:, self.num_prefix_tokens :].contiguous()
         h = rearrange(h, "B (H W) C -> B C H W", H=token_res[0], W=token_res[1])
         y = self.f_a(h)
         # x --16-> h --2-> y --4-> z
@@ -208,6 +257,18 @@ class VitUnionLatentCodec(CompressionModel):
         }
 
     def decompress(self, strings, pstate, **kwargs):
+        """Decompress entropy-coded bitstreams back to ViT features.
+
+        Args:
+            strings (dict): Bitstreams produced by :meth:`compress`, with keys ``\"y\"`` and ``\"z\"``.
+            pstate (dict): Side information produced by :meth:`compress`, including shapes and token resolution.
+            **kwargs (dict): Unused keyword arguments for API compatibility.
+
+        Returns:
+            out (dict): A dictionary with key:
+
+                - ``\"h_hat\"`` (torch.Tensor): Reconstructed ViT features.
+        """
         y_strings = strings["y"]
         z_strings = strings["z"]
         y_shape = pstate["y_shape"]
@@ -228,6 +289,21 @@ class VitUnionLatentCodec(CompressionModel):
 
 @register_model("VbrVitUnionLatentCodec")
 class VbrVitUnionLatentCodec(CompressionModel):
+    """Vit-based union latent codec with variable bit-rate control.
+
+    This variant introduces learnable per-quantization-parameter scaling factors
+    to control the bitrate–distortion trade-off, following the strategy in
+    DCVC. It scales the latents ``y`` before and after entropy coding.
+
+    Args:
+        h_dim (int): Channel dimension of ViT features.
+        y_dim (int): Channel dimension of primary latent representation ``y``.
+        z_dim (int): Channel dimension of hyperprior latent representation ``z``.
+        groups (int or list[int]): Channel groups for channel-wise context modeling.
+        num_prefix_tokens (int): Number of prefix/register tokens in the ViT feature.
+        **kwargs (dict): Extra keyword arguments for compatibility (unused).
+    """
+
     def __init__(
         self,
         h_dim=384,
@@ -252,7 +328,9 @@ class VbrVitUnionLatentCodec(CompressionModel):
         # https://github.com/microsoft/DCVC/blob/main/src/models/image_model.py
 
         self.num_prefix_tokens = num_prefix_tokens
-        self.post_reg_tokens = nn.Parameter(torch.zeros(num_prefix_tokens, h_dim), requires_grad=True)
+        self.post_reg_tokens = nn.Parameter(
+            torch.zeros(num_prefix_tokens, h_dim), requires_grad=True
+        )
         self.pre_vit_blocks = nn.Sequential(
             *[Block(dim=h_dim, num_heads=h_dim // 64, mlp_ratio=4) for _ in range(2)]
         )
@@ -356,13 +434,25 @@ class VbrVitUnionLatentCodec(CompressionModel):
         )
 
     def forward(self, h, token_res, qp=0):
-        # h: vit output tensor (B,L,C)
-        # can be split into 1d cls token and 2d patch tokens
+        """Forward pass for rate–distortion training with quantization parameter.
+
+        Args:
+            h (torch.Tensor): ViT output tensor of shape ``(B, L, C)``.
+            token_res (tuple[int, int]): Spatial token resolution ``(H, W)``.
+            qp (int): Quantization parameter index in ``[0, 64]`` controlling the
+                bitrate–distortion trade-off.
+
+        Returns:
+            out (dict): A dictionary with keys:
+
+                - ``\"h_hat\"`` (torch.Tensor): Reconstructed ViT features.
+                - ``\"likelihoods\"`` (dict): Likelihoods for ``\"y\"`` and ``\"z\"``.
+        """
         enc_gain = self.q_scale_enc[qp : qp + 1, :, :, :]
         dec_gain = self.q_scale_dec[qp : qp + 1, :, :, :]
 
         B = h.shape[0]
-        h = self.pre_vit_blocks(h)[:, self.num_prefix_tokens:].contiguous()
+        h = self.pre_vit_blocks(h)[:, self.num_prefix_tokens :].contiguous()
         h = rearrange(h, "B (H W) C -> B C H W", H=token_res[0], W=token_res[1])
         y = self.f_a(h) * enc_gain
         hyper_out = self.hyper_lc(y)
@@ -383,8 +473,23 @@ class VbrVitUnionLatentCodec(CompressionModel):
         }
 
     def compress(self, h, token_res, qp=0, **kwargs):
+        """Compress ViT features with a given quantization parameter.
+
+        Args:
+            h (torch.Tensor): ViT output tensor of shape ``(B, L, C)``.
+            token_res (tuple[int, int]): Spatial token resolution ``(H, W)``.
+            qp (int): Quantization parameter index in ``[0, 64]``.
+            **kwargs: Unused keyword arguments for API compatibility.
+
+        Returns:
+            dict: A dictionary with keys:
+
+                - ``\"strings\"`` (dict): Bitstreams for ``\"y\"`` and ``\"z\"``.
+                - ``\"pstate\"`` (dict): Side information including shapes, padding,
+                  token resolution and ``qp``.
+        """
         enc_gain = self.q_scale_enc[qp : qp + 1, :, :, :]
-        h = self.pre_vit_blocks(h)[:, self.num_prefix_tokens:].contiguous()
+        h = self.pre_vit_blocks(h)[:, self.num_prefix_tokens :].contiguous()
         h = rearrange(h, "B (H W) C -> B C H W", H=token_res[0], W=token_res[1])
         y = self.f_a(h) * enc_gain
         # x --16-> h --2-> y --4-> z
@@ -407,6 +512,18 @@ class VbrVitUnionLatentCodec(CompressionModel):
         }
 
     def decompress(self, strings, pstate, **kwargs):
+        """Decompress bitstreams produced by :meth:`compress`.
+
+        Args:
+            strings (dict): Bitstreams with keys ``\"y\"`` and ``\"z\"``.
+            pstate (dict): Side information, including shapes, padding and ``qp``.
+            **kwargs (dict): Unused keyword arguments for API compatibility.
+
+        Returns:
+            out (dict): A dictionary with key:
+
+                - ``\"h_hat\"`` (torch.Tensor): Reconstructed ViT features.
+        """
         y_strings_ = strings["y"]
         z_strings_ = strings["z"]
         y_shape = pstate["y_shape"]
@@ -431,6 +548,21 @@ class VbrVitUnionLatentCodec(CompressionModel):
 
 @register_model("VitSeparateLatentCodec")
 class VitSeparateLatentCodec(CompressionModel):
+    """Vit latent codec with separate modeling of class and patch tokens.
+
+    This codec encodes class (prefix) tokens and patch tokens with different
+    hyperprior models. Class tokens are compressed using a dedicated hyperprior
+    codec, while patch tokens are compressed with a hyperprior + SCCTX model.
+
+    Args:
+        h_dim (int): Channel dimension of ViT features.
+        y_dim (int): Channel dimension of primary latent representation ``y``.
+        z_dim (int): Channel dimension of hyperprior latent representation ``z``.
+        groups (int or list[int]): Channel groups for channel-wise context modeling.
+        num_prefix_tokens (int): Number of prefix/register tokens in the ViT feature.
+        **kwargs: Extra keyword arguments for compatibility (unused).
+    """
+
     def __init__(
         self,
         h_dim=384,
@@ -560,17 +692,29 @@ class VitSeparateLatentCodec(CompressionModel):
         )
 
     def forward(self, h, token_res, **kwargs):
-        # h: vit output tensor (B,L,C)
-        # can be split into 1d cls token and 2d patch tokens
+        """Forward pass for separate class/patch token compression.
+
+        Args:
+            h (torch.Tensor): ViT output tensor of shape ``(B, L, C)``.
+            token_res (tuple[int, int]): Spatial token resolution ``(H, W)``.
+            **kwargs: Unused keyword arguments for API compatibility.
+
+        Returns:
+            dict: A dictionary with keys:
+
+                - ``\"h_hat\"`` (torch.Tensor): Reconstructed ViT features.
+                - ``\"likelihoods\"`` (dict): Likelihoods for class ``\"c\"``, patch
+                  latents ``\"y\"`` and hyperprior latents ``\"z\"``.
+        """
         h = self.pre_vit_blocks(h)
 
-        h_cls = h[:, 0:self.num_prefix_tokens]
+        h_cls = h[:, 0 : self.num_prefix_tokens]
         h_cls = rearrange(h_cls, "B L C -> B C L 1")
         cls_out = self.cls_lc(h_cls)
         h_cls_hat = cls_out["params"]
         h_cls_hat = rearrange(h_cls_hat, "B C L 1 -> B L C")
 
-        h_patch = h[:, self.num_prefix_tokens:].contiguous()
+        h_patch = h[:, self.num_prefix_tokens :].contiguous()
         h_patch = rearrange(
             h_patch, "B (H W) C -> B C H W", H=token_res[0], W=token_res[1]
         )
@@ -594,13 +738,27 @@ class VitSeparateLatentCodec(CompressionModel):
         }
 
     def compress(self, h, token_res, **kwargs):
+        """Compress ViT features with separate class and patch codecs.
+
+        Args:
+            h (torch.Tensor): ViT output tensor of shape ``(B, L, C)``.
+            token_res (tuple[int, int]): Spatial token resolution ``(H, W)``.
+            **kwargs: Unused keyword arguments for API compatibility.
+
+        Returns:
+            dict: A dictionary with keys:
+
+                - ``\"strings\"`` (dict): Bitstreams for class ``\"cls\"``, patch
+                  ``\"y\"`` and hyperprior ``\"z\"``.
+                - ``\"pstate\"`` (dict): Side information including shapes and padding.
+        """
         h = self.pre_vit_blocks(h)
 
-        h_cls = h[:, 0:self.num_prefix_tokens]
+        h_cls = h[:, 0 : self.num_prefix_tokens]
         h_cls = rearrange(h_cls, "B L C -> B C L 1")
         cls_out = self.cls_lc.compress(h_cls)
 
-        h_patch = h[:, self.num_prefix_tokens:].contiguous()
+        h_patch = h[:, self.num_prefix_tokens :].contiguous()
         h_patch = rearrange(
             h_patch, "B (H W) C -> B C H W", H=token_res[0], W=token_res[1]
         )
@@ -628,6 +786,18 @@ class VitSeparateLatentCodec(CompressionModel):
         }
 
     def decompress(self, strings, pstate, **kwargs):
+        """Decompress bitstreams back to ViT features.
+
+        Args:
+            strings (dict): Bitstreams for ``\"cls\"``, ``\"y\"`` and ``\"z\"``.
+            pstate (dict): Side information produced by :meth:`compress`.
+            **kwargs: Unused keyword arguments for API compatibility.
+
+        Returns:
+            dict: A dictionary with key:
+
+                - ``\"h_hat\"`` (torch.Tensor): Reconstructed ViT features.
+        """
         cls_out = self.cls_lc.decompress(strings["cls"], pstate["cls_shape"])
         h_cls_hat = cls_out["params"]
         h_cls_hat = rearrange(h_cls_hat, "B C L 1 -> B L C")
@@ -684,6 +854,21 @@ class HyperDecoderWithCtx(nn.Module):
 
 @register_model("VitUnionLatentCodecWithCtx")
 class VitUnionLatentCodecWithCtx(CompressionModel):
+    """Vit union latent codec conditioned on an external context feature map.
+
+    This codec jointly compresses ViT patch tokens and an additional context
+    feature map. The context is injected into both the analysis and synthesis
+    transforms as well as the hyperprior pathway.
+
+    Args:
+        h_dim (int): Channel dimension of ViT features.
+        y_dim (int): Channel dimension of primary latent representation ``y``.
+        z_dim (int): Channel dimension of hyperprior latent representation ``z``.
+        ctx_dim (int): Channel dimension of the external context feature map.
+        groups (int or list[int]): Channel groups for channel-wise context modeling.
+        **kwargs (dict): Extra keyword arguments for compatibility (unused).
+    """
+
     def __init__(
         self,
         h_dim=384,
@@ -812,8 +997,21 @@ class VitUnionLatentCodecWithCtx(CompressionModel):
         )
 
     def forward(self, h, ctx, token_res):
-        # h: vit output tensor (B,L,C)
-        # can be split into 1d cls token and 2d patch tokens
+        """Forward pass with context-conditioned hyperprior.
+
+        Args:
+            h (torch.Tensor): ViT output tensor of shape ``(B, L, C)``.
+            ctx (torch.Tensor): Context feature map of shape ``(B, ctx_dim, H, W)``.
+            token_res (tuple[int, int]): Spatial token resolution ``(H, W)``.
+
+        Returns:
+            out (dict): A dictionary with keys:
+
+                - ``\"h_hat\"`` (torch.Tensor): Reconstructed ViT features.
+                - ``\"h_hat_share\"`` (torch.Tensor): Shared feature map before
+                  context decoding.
+                - ``\"likelihoods\"`` (dict): Likelihoods for ``\"y\"`` and ``\"z\"``.
+        """
         B = h.shape[0]
         h = self.pre_vit_blocks(h)[:, 1:].contiguous()
         h = rearrange(h, "B (H W) C -> B C H W", H=token_res[0], W=token_res[1])
@@ -841,6 +1039,20 @@ class VitUnionLatentCodecWithCtx(CompressionModel):
         }
 
     def compress(self, h, ctx, token_res):
+        """Compress ViT features conditioned on a context feature map.
+
+        Args:
+            h (torch.Tensor): ViT output tensor of shape ``(B, L, C)``.
+            ctx (torch.Tensor): Context feature map of shape ``(B, ctx_dim, H, W)``.
+            token_res (tuple[int, int]): Spatial token resolution ``(H, W)``.
+
+        Returns:
+            out (dict): A dictionary with keys:
+
+                - ``\"strings\"`` (dict): Bitstreams for ``\"y\"`` and ``\"z\"``.
+                - ``\"pstate\"`` (dict): Side information with shapes and token
+                  resolution.
+        """
         h = self.pre_vit_blocks(h)[:, 1:].contiguous()
         h = rearrange(h, "B (H W) C -> B C H W", H=token_res[0], W=token_res[1])
         h_share = self.cond_enc(torch.cat([h, ctx], dim=1))
@@ -853,11 +1065,30 @@ class VitUnionLatentCodecWithCtx(CompressionModel):
 
         return {
             "strings": {"y": y_out["strings"], "z": hyper_out["strings"]},
-            "pstate": {"y_shape": y_out["shape"], "z_shape": hyper_out["shape"], "token_res": token_res},
+            "pstate": {
+                "y_shape": y_out["shape"],
+                "z_shape": hyper_out["shape"],
+                "token_res": token_res,
+            },
             # "y_hat": y_out["y_hat"],
         }
 
     def decompress(self, strings, pstate, ctx, **kwargs):
+        """Decompress context-conditioned bitstreams back to ViT features.
+
+        Args:
+            strings (dict): Bitstreams with keys ``\"y\"`` and ``\"z\"``.
+            pstate (dict): Side information produced by :meth:`compress`.
+            ctx (torch.Tensor): Context feature map used also at decoding time.
+            **kwargs (dict): Unused keyword arguments for API compatibility.
+
+        Returns:
+            out (dict): A dictionary with keys:
+
+                - ``\"h_hat\"`` (torch.Tensor): Reconstructed ViT features.
+                - ``\"h_hat_share\"`` (torch.Tensor): Shared feature map before
+                  context decoding.
+        """
         y_strings_ = strings["y"]
         z_strings_ = strings["z"]
         # assert all(len(y_strings) == len(z_strings) for y_strings in y_strings_)
@@ -876,6 +1107,20 @@ class VitUnionLatentCodecWithCtx(CompressionModel):
 
 @register_model("VitUnionLatentCodecCtxAsHyper")
 class VitUnionLatentCodecCtxAsHyper(CompressionModel):
+    """Vit union latent codec using context as hyperprior parameters.
+
+    Instead of learning hyperprior latents ``z``, this variant derives the
+    entropy model parameters directly from the external context feature map.
+
+    Args:
+        h_dim (int): Channel dimension of ViT features.
+        y_dim (int): Channel dimension of primary latent representation ``y``.
+        z_dim (int): Channel dimension used in context-to-parameter mapping.
+        ctx_dim (int): Channel dimension of the external context feature map.
+        groups (int or list[int]): Channel groups for channel-wise context modeling.
+        **kwargs (dict): Extra keyword arguments for compatibility (unused).
+    """
+
     def __init__(
         self,
         h_dim=384,
@@ -1002,8 +1247,21 @@ class VitUnionLatentCodecCtxAsHyper(CompressionModel):
         self.useless_lc = EntropyBottleneck(z_dim)
 
     def forward(self, h, ctx, token_res):
-        # h: vit output tensor (B,L,C)
-        # can be split into 1d cls token and 2d patch tokens
+        """Forward pass using context-derived entropy model parameters.
+
+        Args:
+            h (torch.Tensor): ViT output tensor of shape ``(B, L, C)``.
+            ctx (torch.Tensor): Context feature map of shape ``(B, ctx_dim, H, W)``.
+            token_res (tuple[int, int]): Spatial token resolution ``(H, W)``.
+
+        Returns:
+            dict: A dictionary with keys:
+
+                - ``\"h_hat\"`` (torch.Tensor): Reconstructed ViT features.
+                - ``\"h_hat_share\"`` (torch.Tensor): Shared feature map before
+                  context decoding.
+                - ``\"likelihoods\"`` (dict): Likelihoods for ``\"y\"``.
+        """
         B = h.shape[0]
         h = self.pre_vit_blocks(h)[:, 1:].contiguous()
         h = rearrange(h, "B (H W) C -> B C H W", H=token_res[0], W=token_res[1])
@@ -1029,6 +1287,19 @@ class VitUnionLatentCodecCtxAsHyper(CompressionModel):
         }
 
     def compress(self, h, ctx, token_res):
+        """Compress ViT features using context-derived entropy parameters.
+
+        Args:
+            h (torch.Tensor): ViT output tensor of shape ``(B, L, C)``.
+            ctx (torch.Tensor): Context feature map of shape ``(B, ctx_dim, H, W)``.
+            token_res (tuple[int, int]): Spatial token resolution ``(H, W)``.
+
+        Returns:
+            dict: A dictionary with keys:
+
+                - ``\"strings\"`` (dict): Bitstreams for ``\"y\"``.
+                - ``\"pstate\"`` (dict): Side information including shapes.
+        """
         h = self.pre_vit_blocks(h)[:, 1:].contiguous()
         h = rearrange(h, "B (H W) C -> B C H W", H=token_res[0], W=token_res[1])
         h_share = self.cond_enc(torch.cat([h, ctx], dim=1))
@@ -1046,6 +1317,22 @@ class VitUnionLatentCodecCtxAsHyper(CompressionModel):
         }
 
     def decompress(self, strings, pstate, ctx, **kwargs):
+        """Decompress bitstreams back to ViT features using context as hyperprior.
+
+        Args:
+            strings (dict): Bitstreams with key ``\"y\"``.
+            pstate (dict): Side information produced by :meth:`compress`.
+            ctx (torch.Tensor): Context feature map used to reconstruct entropy
+                model parameters.
+            **kwargs: Unused keyword arguments for API compatibility.
+
+        Returns:
+            dict: A dictionary with keys:
+
+                - ``\"h_hat\"`` (torch.Tensor): Reconstructed ViT features.
+                - ``\"h_hat_share\"`` (torch.Tensor): Shared feature map before
+                  context decoding.
+        """
         y_strings_ = strings["y"]
         ctx_params = self.f_ctx_params(ctx)
         y_out = self.y_lc.decompress(y_strings_, pstate["y_shape"], ctx_params)

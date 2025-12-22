@@ -30,7 +30,6 @@
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from typing import Any, Dict, List, Tuple, Mapping
 from torch import Tensor
@@ -59,8 +58,6 @@ class FeatureScaleHyperprior(CompressionModel):
     N. Johnston: `"Variational Image Compression with a Scale Hyperprior"
     <https://arxiv.org/abs/1802.01436>`_ Int. Conf. on Learning Representations
     (ICLR), 2018.
-
-    .. code-block:: none
 
                   ┌───┐    y     ┌───┐  z  ┌───┐ z_hat      z_hat ┌───┐
             x ──►─┤g_a├──►─┬──►──┤h_a├──►──┤ Q ├───►───·⋯⋯·───►───┤h_s├─┐
@@ -92,6 +89,14 @@ class FeatureScaleHyperprior(CompressionModel):
     """
 
     def __init__(self, N, M, **kwargs):
+        """Initialize the Scale Hyperprior model.
+
+        Args:
+            N (int): Number of channels in the main network.
+            M (int): Number of channels in the expansion layers (last layer of the
+                encoder and last layer of the hyperprior decoder).
+            **kwargs (dict): Additional keyword arguments passed to parent class.
+        """
         super().__init__(**kwargs)
 
         self.entropy_bottleneck = EntropyBottleneck(N)
@@ -143,9 +148,26 @@ class FeatureScaleHyperprior(CompressionModel):
 
     @property
     def downsampling_factor(self) -> int:
+        """Compute the downsampling factor of the model.
+
+        Returns:
+            factor (int): Downsampling factor (64 for this architecture).
+        """
         return 2 ** (4 + 2)
 
     def forward(self, x):
+        """Forward pass through the Scale Hyperprior model.
+
+        Args:
+            x (torch.Tensor): Input tensor to compress.
+
+        Returns:
+            output (dict): Dictionary containing:
+
+                - "x_hat" (torch.Tensor): Reconstructed tensor.
+                - "likelihoods" (dict): Dictionary with keys "y" and "z" containing
+                  likelihoods for main latents and hyper latents respectively.
+        """
         y = self.g_a(x)
         z = self.h_a(torch.abs(y))
         z_hat, z_likelihoods = self.entropy_bottleneck(z)
@@ -160,7 +182,14 @@ class FeatureScaleHyperprior(CompressionModel):
 
     @classmethod
     def from_state_dict(cls, state_dict):
-        """Return a new model instance from `state_dict`."""
+        """Create a new model instance from state dictionary.
+
+        Args:
+            state_dict (dict): State dictionary containing model weights.
+
+        Returns:
+            model (FeatureScaleHyperprior): New model instance with loaded weights.
+        """
         N = state_dict["g_a.0.weight"].size(0)
         M = state_dict["g_a.6.weight"].size(0)
         net = cls(N, M)
@@ -168,6 +197,17 @@ class FeatureScaleHyperprior(CompressionModel):
         return net
 
     def compress(self, x):
+        """Compress input tensor to bitstrings.
+
+        Args:
+            x (torch.Tensor): Input tensor to compress.
+
+        Returns:
+            output (dict): Dictionary containing:
+
+                - "strings" (list): List of compressed bitstrings [y_strings, z_strings].
+                - "shape" (tuple): Spatial shape of the hyper latents (H, W).
+        """
         y = self.g_a(x)
         z = self.h_a(torch.abs(y))
 
@@ -180,6 +220,18 @@ class FeatureScaleHyperprior(CompressionModel):
         return {"strings": [y_strings, z_strings], "shape": z.size()[-2:]}
 
     def decompress(self, strings, shape):
+        """Decompress bitstrings to reconstructed tensor.
+
+        Args:
+            strings (list): List of compressed bitstrings [y_strings, z_strings].
+                Must contain exactly 2 elements.
+            shape (tuple): Spatial shape of the hyper latents (H, W).
+
+        Returns:
+            output (dict): Dictionary containing:
+
+                - "x_hat" (torch.Tensor): Reconstructed tensor, clamped to [0, 1].
+        """
         assert isinstance(strings, list) and len(strings) == 2
         z_hat = self.entropy_bottleneck.decompress(strings[1], shape)
         scales_hat = self.h_s(z_hat)
@@ -199,10 +251,9 @@ class HyperLatentCodecWithCtx(LatentCodec):
     by J. Balle, D. Minnen, S. Singh, S.J. Hwang, and N. Johnston,
     International Conference on Learning Representations (ICLR), 2018.
 
-    .. note:: ``HyperLatentCodec`` should be used inside
+    ``HyperLatentCodec`` should be used inside
        ``HyperpriorLatentCodec`` to construct a full hyperprior.
 
-    .. code-block:: none
 
                ┌───┐  z  ┌───┐ z_hat      z_hat ┌───┐
         y ──►──┤h_a├──►──┤ Q ├───►───····───►───┤h_s├──►── params
@@ -218,6 +269,17 @@ class HyperLatentCodecWithCtx(LatentCodec):
         quantizer: str = "noise",
         **kwargs,
     ):
+        """Initialize the hyper latent codec with context.
+
+        Args:
+            entropy_bottleneck (EntropyBottleneck): Entropy bottleneck module for
+                compressing hyper latents.
+            h_a (nn.Module): Analysis transform that maps input to hyper latents.
+            h_s (nn.Module): Synthesis transform that maps hyper latents to parameters.
+            quantizer (str): Quantization method. Options: "noise" (default) or "ste".
+                Defaults to "noise".
+            **kwargs (dict): Additional keyword arguments passed to parent class.
+        """
         super().__init__()
         self.entropy_bottleneck = entropy_bottleneck
         self.h_a = h_a
@@ -225,6 +287,19 @@ class HyperLatentCodecWithCtx(LatentCodec):
         self.quantizer = quantizer
 
     def forward(self, y: Tensor, ctx: Tensor) -> Dict[str, Any]:
+        """Forward pass through the hyper latent codec.
+
+        Args:
+            y (torch.Tensor): Main latents to process.
+            ctx (torch.Tensor): Context tensor for conditional processing.
+
+        Returns:
+            output (dict): Dictionary containing:
+
+                - "likelihoods" (dict): Dictionary with key "z" containing likelihoods
+                  for hyper latents.
+                - "params" (torch.Tensor): Parameters generated from hyper latents.
+        """
         z = self.h_a(y, ctx)
         z_hat, z_likelihoods = self.entropy_bottleneck(z)
         if self.quantizer == "ste":
@@ -234,6 +309,19 @@ class HyperLatentCodecWithCtx(LatentCodec):
         return {"likelihoods": {"z": z_likelihoods}, "params": params}
 
     def compress(self, y: Tensor, ctx: Tensor) -> Dict[str, Any]:
+        """Compress main latents to bitstrings.
+
+        Args:
+            y (torch.Tensor): Main latents to compress.
+            ctx (torch.Tensor): Context tensor for conditional processing.
+
+        Returns:
+            output (dict): Dictionary containing:
+
+                - "strings" (list): List containing compressed bitstrings [z_strings].
+                - "shape" (tuple): Spatial shape of hyper latents (H, W).
+                - "params" (torch.Tensor): Parameters generated from hyper latents.
+        """
         z = self.h_a(y, ctx)
         shape = z.size()[-2:]
         z_strings = self.entropy_bottleneck.compress(z)
@@ -244,6 +332,19 @@ class HyperLatentCodecWithCtx(LatentCodec):
     def decompress(
         self, strings: List[List[bytes]], shape: Tuple[int, int], ctx: Tensor, **kwargs
     ) -> Dict[str, Any]:
+        """Decompress bitstrings to parameters.
+
+        Args:
+            strings (list[list[bytes]]): List containing compressed bitstrings [z_strings].
+            shape (tuple[int, int]): Spatial shape of hyper latents (H, W).
+            ctx (torch.Tensor): Context tensor for conditional processing.
+            **kwargs (dict): Additional keyword arguments (unused).
+
+        Returns:
+            output (dict): Dictionary containing:
+
+                - "params" (torch.Tensor): Parameters generated from decompressed hyper latents.
+        """
         (z_strings,) = strings
         z_hat = self.entropy_bottleneck.decompress(z_strings, shape)
         params = self.h_s(z_hat, ctx)
@@ -261,8 +362,6 @@ class HyperpriorLatentCodecWithCtx(LatentCodec):
     by J. Balle, D. Minnen, S. Singh, S.J. Hwang, and N. Johnston,
     International Conference on Learning Representations (ICLR), 2018.
 
-    .. code-block:: none
-
                  ┌──────────┐
             ┌─►──┤ lc_hyper ├──►─┐
             │    └──────────┘    │
@@ -273,8 +372,6 @@ class HyperpriorLatentCodecWithCtx(LatentCodec):
                               └──────┘
 
     By default, the following codec is constructed:
-
-    .. code-block:: none
 
                  ┌───┐  z  ┌───┐ z_hat      z_hat ┌───┐
             ┌─►──┤h_a├──►──┤ Q ├───►───····───►───┤h_s├──►─┐
@@ -291,20 +388,51 @@ class HyperpriorLatentCodecWithCtx(LatentCodec):
                 └───┘          GC
 
     Common configurations of latent codecs include:
+
      - entropy bottleneck ``hyper`` (default) and gaussian conditional ``y`` (default)
      - entropy bottleneck ``hyper`` (default) and autoregressive ``y``
     """
 
     def __init__(self, latent_codec: Mapping[str, LatentCodec], **kwargs):
+        """Initialize the hyperprior latent codec with context.
+
+        Args:
+            latent_codec (Mapping[str, LatentCodec]): Dictionary of latent codecs
+                containing at least "y" and "hyper" keys:
+                - "y": Codec for main latents.
+                - "hyper": Codec for hyper latents (side information).
+            **kwargs (dict): Additional keyword arguments passed to parent class.
+        """
         super().__init__()
         self.y = latent_codec["y"]
         self.hyper = latent_codec["hyper"]
         self.latent_codec = latent_codec
 
     def __getitem__(self, key: str) -> LatentCodec:
+        """Get a latent codec by key.
+
+        Args:
+            key (str): Key to access latent codec (e.g., "y" or "hyper").
+
+        Returns:
+            codec (LatentCodec): Requested latent codec.
+        """
         return self.latent_codec[key]
 
     def forward(self, y: Tensor, ctx: Tensor) -> Dict[str, Any]:
+        """Forward pass through the hyperprior codec.
+
+        Args:
+            y (torch.Tensor): Main latents to process.
+            ctx (torch.Tensor): Context tensor for conditional processing.
+
+        Returns:
+            output (dict): Dictionary containing:
+
+                - "likelihoods" (dict): Dictionary with keys "y" and "z" containing
+                  likelihoods for main latents and hyper latents respectively.
+                - "y_hat" (torch.Tensor): Reconstructed main latents.
+        """
         hyper_out = self.latent_codec["hyper"](y, ctx)
         y_out = self.latent_codec["y"](y, hyper_out["params"])
         return {
@@ -316,6 +444,21 @@ class HyperpriorLatentCodecWithCtx(LatentCodec):
         }
 
     def compress(self, y: Tensor, ctx: Tensor) -> Dict[str, Any]:
+        """Compress main latents to bitstrings.
+
+        Args:
+            y (torch.Tensor): Main latents to compress.
+            ctx (torch.Tensor): Context tensor for conditional processing.
+
+        Returns:
+            output (dict): Dictionary containing:
+
+                - "strings" (list): List of compressed bitstrings, with y_strings
+                  followed by z_strings.
+                - "shape" (dict): Dictionary with keys "y" and "hyper" containing
+                  spatial shapes for main and hyper latents respectively.
+                - "y_hat" (torch.Tensor): Reconstructed main latents.
+        """
         hyper_out = self.latent_codec["hyper"].compress(y, ctx)
         y_out = self.latent_codec["y"].compress(y, hyper_out["params"])
         [z_strings] = hyper_out["strings"]
@@ -332,6 +475,21 @@ class HyperpriorLatentCodecWithCtx(LatentCodec):
         ctx: Tensor,
         **kwargs,
     ) -> Dict[str, Any]:
+        """Decompress bitstrings to reconstructed main latents.
+
+        Args:
+            strings (list[list[bytes]]): List of compressed bitstrings, with y_strings
+                followed by z_strings. All y_strings must have the same length as z_strings.
+            shape (dict[str, tuple[int, ...]]): Dictionary with keys "y" and "hyper"
+                containing spatial shapes for main and hyper latents respectively.
+            ctx (torch.Tensor): Context tensor for conditional processing.
+            **kwargs (dict): Additional keyword arguments (unused).
+
+        Returns:
+            output (dict): Dictionary containing:
+
+                - "y_hat" (torch.Tensor): Reconstructed main latents.
+        """
         *y_strings_, z_strings = strings
         assert all(len(y_strings) == len(z_strings) for y_strings in y_strings_)
         hyper_out = self.latent_codec["hyper"].decompress(

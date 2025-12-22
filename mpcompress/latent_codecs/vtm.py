@@ -4,11 +4,22 @@ import json
 import time
 import subprocess
 import numpy as np
-from omegaconf import OmegaConf
 from tempfile import mkstemp
 
 
 def truncation(feat, trun_low, trun_high):
+    """Truncate features to specified range.
+
+    Args:
+        feat (numpy.ndarray): Input features with shape (N, C, H, W).
+        trun_low (float or list[float]): Lower bound(s) for truncation.
+            If list, should have length C for per-channel truncation.
+        trun_high (float or list[float]): Upper bound(s) for truncation.
+            If list, should have length C for per-channel truncation.
+
+    Returns:
+        trun_feat (numpy.ndarray): Truncated features with same shape as input.
+    """
     trun_feat = np.zeros_like(feat).astype(np.float32)
     if isinstance(trun_low, list):
         for idx in range(len(trun_low)):
@@ -22,17 +33,16 @@ def truncation(feat, trun_low, trun_high):
 
 
 def load_quantization_points(file_path: str or list[str]):
-    """
-    Load quantization points from a file or a list of files.
+    """Load quantization points from a file or a list of files.
 
-    Parameters:
-        file_path (Union[str, List[str]]): Path to load the quantization points from.
-            Can be a single file path (str) or a list of file paths (List[str]).
+    Args:
+        file_path (str or list[str]): Path to load the quantization points from.
+            Can be a single file path (str) or a list of file paths (list[str]).
 
     Returns:
-        Union[numpy.ndarray, List[numpy.ndarray]]: Loaded quantization points. If `file_path`
-            is a single path, returns a single numpy.ndarray. If `file_path` is a list of paths,
-            returns a list of numpy.ndarray.
+        quantization_points (numpy.ndarray or list[numpy.ndarray]): Loaded quantization points.
+            If file_path is a single path, returns a single numpy.ndarray.
+            If file_path is a list of paths, returns a list of numpy.ndarray.
     """
 
     def load_file(path):
@@ -52,6 +62,20 @@ def load_quantization_points(file_path: str or list[str]):
 
 
 def uniform_quantization(feat, min_v, max_v, bit_depth):
+    """Apply uniform quantization to features.
+
+    Args:
+        feat (numpy.ndarray): Input features with shape (N, C, H, W).
+        min_v (float or list[float]): Minimum value(s) for quantization range.
+            If list, should have length C for per-channel quantization.
+        max_v (float or list[float]): Maximum value(s) for quantization range.
+            If list, should have length C for per-channel quantization.
+        bit_depth (int): Bit depth for quantization (e.g., 8 or 10).
+
+    Returns:
+        quant_feat (numpy.ndarray): Quantized features as uint8 or uint16,
+            depending on bit_depth.
+    """
     quant_feat = np.zeros_like(feat).astype(np.float32)
     if isinstance(min_v, list):
         for idx in range(len(min_v)):
@@ -68,6 +92,19 @@ def uniform_quantization(feat, min_v, max_v, bit_depth):
 
 
 def uniform_dequantization(feat, min_v, max_v, bit_depth):
+    """Apply uniform dequantization to quantized features.
+
+    Args:
+        feat (numpy.ndarray): Quantized features (uint8 or uint16) with shape (N, C, H, W).
+        min_v (float or list[float]): Minimum value(s) used during quantization.
+            If list, should have length C for per-channel dequantization.
+        max_v (float or list[float]): Maximum value(s) used during quantization.
+            If list, should have length C for per-channel dequantization.
+        bit_depth (int): Bit depth used during quantization (e.g., 8 or 10).
+
+    Returns:
+        dequant_feat (numpy.ndarray): Dequantized features as float32 with same shape as input.
+    """
     feat = feat.astype(np.float32)
     dequant_feat = np.zeros_like(feat).astype(np.float32)
     if isinstance(min_v, list):
@@ -81,17 +118,18 @@ def uniform_dequantization(feat, min_v, max_v, bit_depth):
 
 
 def nonlinear_quantization(data, quantization_points, bit_depth):
-    """
-    Apply quantization to data using a single or multiple sets of quantization points.
+    """Apply nonlinear quantization to data using quantization points.
 
-    Parameters:
+    Args:
         data (numpy.ndarray): Original floating-point array with shape (N, C, H, W).
-        quantization_points (Union[numpy.ndarray, List[numpy.ndarray]]):
-            A single numpy array of quantization points or a list of numpy arrays,
-            one for each channel (C).
+        quantization_points (numpy.ndarray or list[numpy.ndarray]): Quantization points.
+            If single array, applied to all channels. If list, should have length C
+            with one array per channel.
+        bit_depth (int): Bit depth for quantization (e.g., 8 or 10).
 
     Returns:
-        numpy.ndarray: Quantized integer array with the same shape as the input data.
+        quantized_data (numpy.ndarray): Quantized integer array (uint8 or uint16)
+            with the same shape as the input data.
     """
     if isinstance(quantization_points, np.ndarray):
         # If quantization_points is a single array, apply it to all channels
@@ -131,17 +169,17 @@ def nonlinear_quantization(data, quantization_points, bit_depth):
 
 
 def nonlinear_dequantization(quantized_data, quantization_points):
-    """
-    Dequantize quantized data back to its approximate original floating-point values.
+    """Dequantize quantized data back to approximate original floating-point values.
 
-    Parameters:
+    Args:
         quantized_data (numpy.ndarray): Quantized integer array with shape (N, C, H, W).
-        quantization_points (Union[numpy.ndarray, List[numpy.ndarray]]):
-            A single numpy array of quantization points or a list of numpy arrays,
-            one for each channel (C).
+        quantization_points (numpy.ndarray or list[numpy.ndarray]): Quantization points.
+            If single array, applied to all channels. If list, should have length C
+            with one array per channel. Points are automatically sorted.
 
     Returns:
-        numpy.ndarray: Dequantized floating-point array with the same shape as the input data.
+        dequantized_data (numpy.ndarray): Dequantized floating-point array (float32)
+            with the same shape as the input data.
     """
     if isinstance(quantization_points, np.ndarray):
         # If quantization_points is a single array, apply it to all channels
@@ -170,6 +208,17 @@ def nonlinear_dequantization(quantized_data, quantization_points):
 
 
 def packing(feat, model_type):
+    """Pack features into 2D format for video codec encoding.
+
+    Args:
+        feat (numpy.ndarray): Input features with shape (N, C, H, W).
+        model_type (str): Model type determining packing strategy.
+            Options: "llama3", "dinov2", "sd3".
+
+    Returns:
+        packed_feat (numpy.ndarray): Packed features as 2D array suitable for
+            video codec encoding.
+    """
     N, C, H, W = feat.shape
     if model_type == "llama3":
         feat = feat[0, 0, :, :]
@@ -185,6 +234,17 @@ def packing(feat, model_type):
 
 
 def unpacking(feat, shape, model_type):
+    """Unpack 2D features back to original 4D format.
+
+    Args:
+        feat (numpy.ndarray): Packed 2D features from video codec decoding.
+        shape (tuple[int, int, int, int]): Target shape (N, C, H, W) to unpack to.
+        model_type (str): Model type determining unpacking strategy.
+            Options: "llama3", "dinov2", "sd3".
+
+    Returns:
+        unpacked_feat (numpy.ndarray): Unpacked features with shape (N, C, H, W).
+    """
     N, C, H, W = shape
     if model_type == "llama3":
         feat = np.expand_dims(feat, axis=0)
@@ -201,6 +261,20 @@ def unpacking(feat, shape, model_type):
 
 
 def run_shell(cmd, ignore_returncodes=None):
+    """Run shell command and return output.
+
+    Args:
+        cmd (str or list[str]): Command to execute. If list, will be joined with spaces.
+        ignore_returncodes (list[int], optional): List of return codes to ignore.
+            If command returns one of these codes, output is returned instead of exiting.
+            Defaults to None.
+
+    Returns:
+        output (str): Decoded command output as ASCII string.
+
+    Raises:
+        SystemExit: If command fails and return code is not in ignore_returncodes.
+    """
     if isinstance(cmd, list):
         cmd = " ".join(cmd)
     try:
@@ -214,14 +288,35 @@ def run_shell(cmd, ignore_returncodes=None):
 
 
 def filesize(filepath: str) -> int:
-    """Return file size in bytes of `filepath`."""
+    """Return file size in bytes.
+
+    Args:
+        filepath (str): Path to the file.
+
+    Returns:
+        size (int): File size in bytes.
+
+    Raises:
+        ValueError: If filepath is not a valid file.
+    """
     if not os.path.isfile(filepath):
         raise ValueError(f'Invalid file "{filepath}".')
     return os.stat(filepath).st_size
 
 
 class VtmCodec:
+    """VTM (VVC Test Model) codec wrapper for video encoding and decoding.
+
+    This class provides an interface to VTM encoder and decoder executables
+    for compressing and decompressing video data.
+    """
+
     def __init__(self, repo_dir):
+        """Initialize VTM codec.
+
+        Args:
+            repo_dir (str): Path to VTM repository directory containing bin/ and cfg/ folders.
+        """
         self.encoder_path = os.path.join(repo_dir, "bin", "EncoderAppStatic")
         self.decoder_path = os.path.join(repo_dir, "bin", "DecoderAppStatic")
         self.config_path = os.path.join(repo_dir, "cfg", "encoder_intra_vtm.cfg")
@@ -239,6 +334,17 @@ class VtmCodec:
         bitdepth: int = 8,
         chroma_format: str = "400",
     ):
+        """Compress raw video file using VTM encoder.
+
+        Args:
+            raw_path (str): Path to input raw YUV file.
+            bin_path (str): Path to output compressed bitstream file.
+            width (int): Video width in pixels.
+            height (int): Video height in pixels.
+            qp (int): Quantization parameter (0-51, lower is higher quality).
+            bitdepth (int): Bit depth (8 or 10). Defaults to 8.
+            chroma_format (str): Chroma format. Defaults to "400" (grayscale).
+        """
         cmd = (
             f"{self.encoder_path} -c {self.config_path} "
             f'-i {raw_path} -o "" -b {bin_path} -q {qp} --ConformanceWindowMode=1 '
@@ -249,24 +355,68 @@ class VtmCodec:
         run_shell(cmd)
 
     def decompress(self, bin_path, rec_path, bit_depth=8):
+        """Decompress VTM bitstream to raw video file.
+
+        Args:
+            bin_path (str): Path to input compressed bitstream file.
+            rec_path (str): Path to output reconstructed YUV file.
+            bit_depth (int): Bit depth (8 or 10). Defaults to 8.
+        """
         cmd = f"{self.decoder_path} -b {bin_path} -o {rec_path} -d {bit_depth}"
         run_shell(cmd)
 
 
 class VtmImageCodec:
+    """VTM-based image codec (placeholder class).
+
+    This class is reserved for future image codec implementation using VTM.
+    """
+
     pass
 
 
 class VtmFeatureCodec:
+    """VTM-based feature codec for compressing neural network features.
+
+    This codec applies truncation, quantization, packing, VTM encoding/decoding,
+    and post-processing to compress features from various model types (llama3, dinov2, sd3).
+    """
+
     def __init__(self, cfg):
+        """Initialize VTM feature codec.
+
+        Args:
+            cfg (dict): Configuration object containing:
+
+                - vtm_path (str): Path to VTM repository directory.
+                - trun_flag (bool): Whether to apply truncation.
+                - trun_low (float or list[float]): Lower truncation bound(s).
+                - trun_high (float or list[float]): Upper truncation bound(s).
+                - bit_depth (int): Bit depth for quantization.
+                - model_type (str): Model type ("llama3", "dinov2", or "sd3").
+        """
         self.cfg = cfg
         self.codec = VtmCodec(cfg.vtm_path)
 
-    def forward_test( # just for debug
-        self,
-        org_feat,
-        qp: int,
-    ):
+    def forward_test(self, org_feat, qp: int):
+        """Forward test method for debugging (includes timing measurements).
+
+        This method performs full encode-decode cycle and returns both compressed
+        representation and decoded features with timing information.
+
+        Args:
+            org_feat (numpy.ndarray): Original features to compress.
+            qp (int): Quantization parameter for VTM encoding.
+
+        Returns:
+            coded_unit (dict): Dictionary containing:
+
+                - "strings" (dict): Compressed bitstring with key "vtm".
+                - "pstate" (dict): State information including paths and shapes.
+            decoded (dict): Dictionary containing:
+
+                - "h_hat" (numpy.ndarray): Decoded features.
+        """
         cfg = self.cfg
         org_feat_shape = org_feat.shape
 
@@ -294,12 +444,12 @@ class VtmFeatureCodec:
             cfg.bit_depth,
             "400",
         )
-        enc_time = time.time() - start
+        _enc_time = time.time() - start
 
         # VTM decoding
         start = time.time()
         self.codec.decompress(bin_path, rec_path, cfg.bit_depth)
-        dec_time = time.time() - start
+        _dec_time = time.time() - start
 
         # Load decoded YUV
         with open(rec_path, "rb") as f:
@@ -328,7 +478,7 @@ class VtmFeatureCodec:
                 "pack_shape": pack_feat.shape,
                 "feat_shape": org_feat.shape,
                 "bit_depth": cfg.bit_depth,
-            }
+            },
         }
         decoded = {
             "h_hat": dequant_feat,
@@ -347,7 +497,24 @@ class VtmFeatureCodec:
         org_feat,
         qp: int,
     ):
-        # expected feature: (N_crop, N_layer, H*W+1, C)
+        """Compress features using VTM codec.
+
+        Expected feature shape: (N_crop, N_layer, H*W+1, C)
+
+        Args:
+            org_feat (numpy.ndarray): Original features to compress.
+            qp (int): Quantization parameter for VTM encoding.
+
+        Returns:
+            output (dict): Dictionary containing:
+
+                - "strings" (dict): Compressed bitstring with key "vtm".
+                - "pstate" (dict): State information including:
+                    - "bin_path" (str): Path to compressed bitstream.
+                    - "pack_shape" (tuple): Shape of packed features.
+                    - "feat_shape" (tuple): Original feature shape.
+                    - "bit_depth" (int): Bit depth used.
+        """
         cfg = self.cfg
 
         # Truncation
@@ -382,10 +549,28 @@ class VtmFeatureCodec:
                 "pack_shape": pack_feat.shape,
                 "feat_shape": org_feat.shape,
                 "bit_depth": cfg.bit_depth,
-            }
+            },
         }
 
     def decompress(self, strings, pstate, **kwargs):
+        """Decompress features from VTM bitstream.
+
+        Note: model_type, bit_depth, trun_low, trun_high are fixed in self.cfg.
+
+        Args:
+            strings (dict): Dictionary with key "vtm" containing compressed bitstring.
+            pstate (dict): State dictionary containing:
+
+                - "bin_path" (str): Path to compressed bitstream.
+                - "pack_shape" (tuple): Shape of packed features.
+                - "feat_shape" (tuple): Target feature shape.
+                - "bit_depth" (int): Bit depth used.
+            **kwargs (dict): Additional keyword arguments (unused).
+
+        Returns:
+            decoded (dict): Dictionary containing:
+                - "h_hat" (numpy.ndarray): Decoded features with original shape.
+        """
         bin_path = pstate["bin_path"]
         pack_shape = pstate["pack_shape"]
         feat_shape = pstate["feat_shape"]
