@@ -9,8 +9,6 @@ class VideoFolder(Dataset):
     """Load an image folder database. Training and testing image samples
     are respectively stored in separate directories:
 
-    .. code-block::
-
         - rootdir/
             - train/
                 - video000.yuv
@@ -26,7 +24,9 @@ class VideoFolder(Dataset):
         split (string): split mode ('train' or 'val')
     """
 
-    def __init__(self, root, transform=None, split="train", src_type="yuv420", sequences=[]):
+    def __init__(
+        self, root, transform=None, split="train", src_type="yuv420", sequences=[]
+    ):
         splitdir = Path(root) / split
 
         if not splitdir.is_dir():
@@ -49,20 +49,23 @@ class VideoFolder(Dataset):
             index (int): Index
 
         Returns:
-            img: `PIL.Image.Image` or transformed `PIL.Image.Image`.
+            reader (VideoReader): Video reader object.
+            vid_meta (dict): Video metadata.
         """
         seq_name = self.sequences_names[index]
         vid_meta = self.sequences_meta[seq_name]
         vid_meta["seq_name"] = seq_name
-        path = str(self.splitdir / seq_name) 
+        path = str(self.splitdir / seq_name)
         if self.src_type == "yuv420":
-            reader = YUV420VideoReader(path, vid_meta["src_width"], vid_meta["src_height"])
+            reader = YUV420VideoReader(
+                path, vid_meta["src_width"], vid_meta["src_height"]
+            )
         elif self.src_type == "png":
-            reader = PngSequenceVideoReader(path, vid_meta["src_width"], vid_meta["src_height"])
+            reader = PngSequenceVideoReader(
+                path, vid_meta["src_width"], vid_meta["src_height"]
+            )
         return reader, vid_meta
 
 
 class VideoDetectionDataset(Dataset):
     pass
-
-
