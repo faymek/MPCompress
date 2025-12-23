@@ -31,6 +31,14 @@ echo "Virtual environment created in $(poetry env list --full-path)"
 poetry run pip install --editable .
 ```
 
+Currently, the project use the .env file to avoid hardcoding the absolute path. 
+Run install.py to create the .env file with "PROJECT_ROOT" variable.
+
+```bash
+python install.py
+```
+
+
 ## Documentation
 
 * [Documentation](https://faymek.github.io/MPCompress)
