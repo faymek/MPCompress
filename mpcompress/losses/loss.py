@@ -5,13 +5,37 @@ import math
 
 
 class SimpleLoss(nn.Module):
+    """Simple loss function that extracts loss directly from model output.
+
+    This loss function is a wrapper that simply retrieves the loss value
+    from the model output dictionary and returns it along with monitoring metrics.
+    """
+
     def __init__(
         self,
         **kwargs,
     ):
+        """Initialize SimpleLoss.
+
+        Args:
+            **kwargs (dict): Additional keyword arguments (currently unused).
+        """
         super().__init__()
 
     def forward(self, output, x):
+        """Forward pass to compute loss.
+
+        Args:
+            output (dict): Model output dictionary containing:
+
+                - "loss" (torch.Tensor): Pre-computed loss tensor
+                - "monitor" (dict, optional): Additional monitoring metrics
+            x (torch.Tensor): Input tensor (not used, kept for interface compatibility)
+
+        Returns:
+            loss (torch.Tensor): The loss tensor
+            monitor (dict): Dictionary of monitoring metrics including loss value and additional metrics from output["monitor"] if present
+        """
         loss = output["loss"]
         monitor = {
             "loss": loss.detach().mean().item(),
@@ -22,17 +46,65 @@ class SimpleLoss(nn.Module):
 
 
 class MPC2Loss(nn.Module):
+    """MPC2 loss function combining rate-distortion optimization.
+
+    This loss function combines:
+
+    - Bits per pixel (BPP) loss from likelihoods
+    - PATCH tokens reconstruction loss
+    - CLS token reconstruction loss
+
+    The total loss is: rlmbda * bpp_loss + cls_token_loss + patch_tokens_loss
+    """
+
     def __init__(
         self,
-        rlmbda=24.0,
+        rlmbda=1.0,
     ):
+        """Initialize MPC2Loss.
+
+        Args:
+            rlmbda (float, optional): Rate-distortion trade-off parameter.
+                Higher values emphasize compression rate. Defaults to 1.0.
+        """
         super().__init__()
         self.rlmbda = rlmbda
 
     def get_rlmbda(self, global_step=None):
+        """Get the rate-distortion trade-off parameter.
+
+        Args:
+            global_step (int, optional): Current training step (currently unused).
+                Can be used for scheduled lambda values in the future.
+
+        Returns:
+            rlmbda (float): The rate-distortion trade-off parameter.
+        """
         return self.rlmbda
 
     def forward(self, output, x, x_shape=None, global_step=None):
+        """Forward pass to compute MPC2 loss.
+
+        Args:
+            output (dict): Model output dictionary containing:
+
+                - "likelihoods" (dict): Dictionary of likelihood tensors for BPP calculation
+                - "h_dino_hat" (torch.Tensor): Reconstructed DINO features [B, N+1, D]
+                - "h_dino" (torch.Tensor): Target DINO features [B, N+1, D]
+                - "monitor" (dict, optional): Additional monitoring metrics
+            x (torch.Tensor, optional): Input tensor [B, C, H, W].
+                Used to infer shape if x_shape is None.
+            x_shape (tuple, optional): Shape of input tensor (N, C, H, W).
+                Required if x is None.
+            global_step (int, optional): Current training step for lambda scheduling.
+
+        Returns:
+            loss (torch.Tensor): The total loss tensor
+            monitor (dict): Dictionary of monitoring metrics including loss value and additional metrics from output["monitor"] if present
+
+        Raises:
+            ValueError: If both x and x_shape are None.
+        """
         if x is None and x_shape is None:
             raise ValueError("x and x_shape cannot be both None")
         x_shape = x.shape if x is not None else x_shape
@@ -52,7 +124,7 @@ class MPC2Loss(nn.Module):
         cls_token_loss = F.mse_loss(h_dino_hat[:, 0, :], h_dino[:, 0, :])
 
         rlmbda = self.get_rlmbda(global_step)
-        loss = rlmbda * bpp_loss + cls_token_loss + h_dino_loss  # + h_vqgan_loss
+        loss = rlmbda * bpp_loss + cls_token_loss + h_dino_loss
 
         monitor = {
             "loss": loss.detach().mean().item(),
@@ -70,17 +142,68 @@ class MPC2Loss(nn.Module):
 
 
 class MPC12Loss(nn.Module):
+    """MPC12 loss function combining rate-distortion optimization.
+
+    This loss function combines:
+
+    - Bits per pixel (BPP) loss from likelihoods
+    - VQGAN feature reconstruction loss
+    - PATCH tokens reconstruction loss
+    - CLS token reconstruction loss
+
+    The total loss is: rlmbda * bpp_loss + cls_token_loss + patch_tokens_loss + h_vqgan_loss
+    """
+
     def __init__(
         self,
-        rlmbda=24.0,
+        rlmbda=1.0,
     ):
+        """Initialize MPC12Loss.
+
+        Args:
+            rlmbda (float, optional): Rate-distortion trade-off parameter.
+                Higher values emphasize compression rate. Defaults to 1.0.
+        """
         super().__init__()
         self.rlmbda = rlmbda
 
     def get_rlmbda(self, global_step=None):
+        """Get the rate-distortion trade-off parameter.
+
+        Args:
+            global_step (int, optional): Current training step (currently unused).
+                Can be used for scheduled lambda values in the future.
+
+        Returns:
+            rlmbda (float): The rate-distortion trade-off parameter.
+        """
         return self.rlmbda
 
     def forward(self, output, x, x_shape=None, global_step=None):
+        """Forward pass to compute MPC12 loss.
+
+        Args:
+            output (dict): Model output dictionary containing:
+
+                - "likelihoods" (dict): Dictionary of likelihood tensors for BPP calculation
+                - "h_vqgan_hat" (torch.Tensor): Reconstructed VQGAN features
+                - "h_vqgan" (torch.Tensor): Target VQGAN features
+                - "h_dino_hat" (torch.Tensor): Reconstructed DINO features [B, N+1, D]
+                - "h_dino" (torch.Tensor): Target DINO features [B, N+1, D]
+                - "monitor" (dict, optional): Additional monitoring metrics
+            x (torch.Tensor, optional): Input tensor [B, C, H, W].
+                Used to infer shape if x_shape is None.
+            x_shape (tuple, optional): Shape of input tensor (N, C, H, W).
+                Required if x is None.
+            global_step (int, optional): Current training step for lambda scheduling.
+
+        Returns:
+            loss (torch.Tensor): The total loss tensor
+            monitor (dict): Dictionary of monitoring metrics including loss value and additional metrics from output["monitor"] if present
+
+        Raises:
+            ValueError: If both x and x_shape are None.
+        """
         if x is None and x_shape is None:
             raise ValueError("x and x_shape cannot be both None")
         x_shape = x.shape if x is not None else x_shape
