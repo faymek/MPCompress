@@ -5,9 +5,9 @@ repo_url = "https://github.com/faymek/MPCompress"
 site_url = "https://faymek.github.io/MPCompress"
 
 nav = [
-  {"Home" = "index.md"},
-  {"Framework" = "framework.md"},
-  {"API Reference" = [
+  { "Home" = "index.md" },
+  { "Framework" = "framework.md" },
+  { "API Reference" = [
     "api/models.md",
     "api/backbone.md",
     "api/latent_codecs.md",
@@ -17,14 +17,14 @@ nav = [
     "api/datasets.md",
     "api/losses.md",
     "api/metrics.md",
-    {"utils" = [
+    { "utils" = [
       "api/utils/utils.md",
       "api/utils/transforms.md",
       "api/utils/tensor_ops.md",
       "api/utils/stream_helper.md",
       "api/utils/debug.md",
-    ]}
-  ]}
+    ] },
+  ] },
 ]
 
 [project.theme]
@@ -36,18 +36,17 @@ features = [
   "navigation.path",
   # "navigation.instant",
   # "navigation.instant.prefetch",
-  "search.highlight"
+  "search.highlight",
 ]
 
 [project.markdown_extensions.pymdownx.superfences]
 custom_fences = [
-  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" }
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
 ]
 
 [project.plugins.mkdocstrings.handlers.python]
 inventories = ["https://docs.python.org/3/objects.inv"]
 paths = ["src"]
-enable_inventory = true
 
 [project.plugins.mkdocstrings.handlers.python.options]
 docstring_style = "google"
