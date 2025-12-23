@@ -5,13 +5,33 @@ from datetime import datetime
 
 
 def get_timestamp():
+    """
+    Generate a timestamp string in the format YYMMDD-HHMMSS.
+
+    Returns:
+        timestamp (str): Timestamp string in format "YYMMDD-HHMMSS".
+    """
     return datetime.now().strftime("%y%m%d-%H%M%S")
 
 
 def setup_logger(
     logger_name, root, phase, level=logging.INFO, screen=False, tofile=False
 ):
-    """set up logger"""
+    """
+    Set up a logger with optional file and screen handlers.
+
+    Configures a logger with the specified name and level. Can optionally
+    add a file handler (appending to log file) and/or a stream handler
+    (outputting to console).
+
+    Args:
+        logger_name (str): Name of the logger to create or retrieve.
+        root (str): Root directory path for log files.
+        phase (str): Phase name used to construct log file name (e.g., "train", "test").
+        level (int): Logging level (e.g., logging.INFO, logging.DEBUG). Defaults to logging.INFO.
+        screen (bool): If True, add a StreamHandler for console output. Defaults to False.
+        tofile (bool): If True, add a FileHandler for file output. Defaults to False.
+    """
     lg = logging.getLogger(logger_name)
     formatter = logging.Formatter(
         "%(asctime)s.%(msecs)03d - %(levelname)s: %(message)s",
@@ -30,20 +50,24 @@ def setup_logger(
 
 
 def rename_key_by_rules(key: str, rules: list) -> str:
-    """根据规则重命名 key，优先使用预设语义，最后使用regex匹配
+    """
+    Rename a key according to a list of rules, using preset semantics first, then regex matching.
+
+    Rules are processed in order. The first matching rule is applied and the function returns.
+    Rule types include: "startswith", "endswith", "contains", "exact", "regex".
 
     Args:
-        key: 要处理的原始键名
-        rules: 规则列表，每条规则格式为 [type, pattern, replacement]
-               type 可以是: "startswith", "endswith", "contains", "exact", "regex"
+        key (str): Original key name to process.
+        rules (list): List of rules, each rule is a list of [type, pattern, replacement].
+            type can be: "startswith", "endswith", "contains", "exact", "regex".
 
     Returns:
-        重命名后的键名
+        renamed_key (str): Renamed key if a rule matches, otherwise returns the original key.
     """
     for rule in rules:
         if len(rule) != 3:
             print(f"Warning: Invalid rule format: {rule}")
-            continue  # 跳过格式不正确的规则
+            continue  # Skip invalid rule format
 
         rule_type, pattern, replacement = rule
 
@@ -57,7 +81,9 @@ def rename_key_by_rules(key: str, rules: list) -> str:
 
         elif rule_type == "contains":
             if pattern in key:
-                return key.replace(pattern, replacement, 1)  # 只替换第一个匹配
+                return key.replace(
+                    pattern, replacement, 1
+                )  # Replace only the first match
 
         elif rule_type == "exact":
             if key == pattern:
@@ -71,4 +97,4 @@ def rename_key_by_rules(key: str, rules: list) -> str:
                 if pattern.match(key):
                     return pattern.sub(replacement, key)
 
-    return key  # 无匹配时返回原 key
+    return key  # Return original key if no match
