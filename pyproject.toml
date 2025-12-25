@@ -66,6 +66,14 @@ tqdm = "^4.67.1"
 pybind11 = "^2.13.6"
 compressai = "^1.2.8"
 torchac = "^0.9.3"
+dotenv = "^0.9.9"
+
+[tool.poetry.group.docs]
+optional = true
+
+[tool.poetry.group.docs.dependencies]
+zensical = "*"
+mkdocstrings-python = "*"
 
 [[tool.poetry.source]]
 name = "pytorch-cu121"
