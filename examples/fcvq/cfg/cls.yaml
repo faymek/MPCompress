@@ -1,0 +1,9 @@
+model_type: dinov2
+task: cls
+
+lambda_value: [1, 1, 1, 1, 1]
+Codebook_size_all: [8, 16, 32, 512, 2048]
+Chunk_size: [64, 64, 64, 64, 32]
+epochs: 800
+learning_rate: "1e-5"
+batch_size: 64
