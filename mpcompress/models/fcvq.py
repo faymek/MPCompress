@@ -21,6 +21,7 @@ Testing bits:
     feat_hat = codec.decompress(strings, feat.shape)
     logits = codec.forward_decode(feat_hat)
 """
+
 from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple, Union
 import types
@@ -29,15 +30,11 @@ import torch.nn as nn
 from mpcompress.latent_codecs.fcvq_model import FCVQ
 import math
 import itertools
-import warnings
 from functools import partial
 import numpy as np
-import torch
 import torch.nn.functional as F
 from PIL import Image
 from tqdm import tqdm
-warnings.filterwarnings("ignore")
-warnings.filterwarnings("ignore", category=FutureWarning)
 import mmcv
 from mmcv.parallel import collate, scatter
 from mmcv.runner import load_checkpoint
@@ -46,10 +43,14 @@ from mmseg.datasets.pipelines import Compose
 from mmseg.ops import resize
 from mpcompress.backbone.dinov2.hub.classifiers import dinov2_vitg14_lc
 from mpcompress.backbone.dinov2.hub.backbones import dinov2_vitg14
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+PROJECT_HOME = os.getenv("PROJECT_HOME")
 
 
 class Dinov2FCVQCodec(nn.Module):
-
     def __init__(
         self,
         fcvq_kwargs: Optional[Dict[str, Any]] = None,
@@ -67,7 +68,6 @@ class Dinov2FCVQCodec(nn.Module):
 
         self.dino = None
         if build_dino:
-            
             dino_kwargs = dino_kwargs or {"layers": 1, "pretrained": True}
             self.dino = dinov2_vitg14_lc(**dino_kwargs)
 
@@ -88,7 +88,6 @@ class Dinov2FCVQCodec(nn.Module):
 
     @torch.no_grad()
     def forward_decode(self, feat: torch.Tensor) -> torch.Tensor:
-
         if self.dino is None:
             raise RuntimeError("Set build_dino=True")
         return self.dino.forward_decode(feat)
@@ -107,14 +106,18 @@ class Dinov2FCVQCodec(nn.Module):
             self.fcvq.uncondi_entropy_model.get_ready_for_compression()
 
         feat_hat, mse_loss, strings, encoding_inds = self.fcvq.compress(feat)
-        coded_unit = {"strings": {"indices": [strings], 
-                    },
-                    "pstate":{"feat_shape": feat_hat.shape},
-                    }
+        coded_unit = {
+            "strings": {
+                "indices": [strings],
+            },
+            "pstate": {"feat_shape": feat_hat.shape},
+        }
         return coded_unit
 
     @torch.no_grad()
-    def decompress(self, strings: List[bytes], feat_shape: Union[Tuple[int, ...], torch.Size]) -> torch.Tensor:
+    def decompress(
+        self, strings: List[bytes], feat_shape: Union[Tuple[int, ...], torch.Size]
+    ) -> torch.Tensor:
         task_feats = self.fcvq.decompress(strings, tuple(feat_shape))
         return task_feats
 
@@ -122,24 +125,25 @@ class Dinov2FCVQCodec(nn.Module):
         """save fcvq parameters only"""
         return self.fcvq.state_dict()
 
-    def load_state_dict_compressor(self, state_dict: Dict[str, Any], strict: bool = True) -> None:
+    def load_state_dict_compressor(
+        self, state_dict: Dict[str, Any], strict: bool = True
+    ) -> None:
         """load fcvq only"""
         self.fcvq.load_state_dict(state_dict, strict=strict)
 
-
     def seg_eval_from_feature_files(
-    self,
-    load_vq: bool = False,
-    vq_path: Optional[str] = None,
-    *,
-    list_file: str = "/code/examples/fcvq/val_100.txt",
-    img_root: str = "/data/bitahub/VOC2012",
-    feat_dir: str = "/data/qiaoxichen/model/dinov2_dataset/seg/test",
-    feat_aug_dir: str = "/data/qiaoxichen/model/dinov2_dataset/seg/test",
-    head_dataset: str = "voc2012",
-    head_type: str = "linear",
-    num_classes: int = 21,
-    device: str = "cuda",
+        self,
+        load_vq: bool = False,
+        vq_path: Optional[str] = None,
+        *,
+        list_file: str = f"{PROJECT_HOME}/examples/fcvq/cfg/val_100.txt",
+        img_root: str = f"{PROJECT_HOME}/data/VOC2012",
+        feat_dir: str = f"{PROJECT_HOME}/features/fcvq/seg/test",
+        feat_aug_dir: str = f"{PROJECT_HOME}/features/fcvq/seg/test",
+        head_dataset: str = "voc2012",
+        head_type: str = "linear",
+        num_classes: int = 21,
+        device: str = "cuda",
     ) -> Dict[str, Any]:
         """Segmentation mIoU eval using feature files (original vs FCVQ recon).
         Pipeline aligned with test_bits_seg.py but simplified and device-safe.
@@ -157,16 +161,21 @@ class Dinov2FCVQCodec(nn.Module):
                 self.load_state_dict_compressor(ckpt)
 
         self.eval().to(device_t)
+
         # -------------------------
         # utils
         # -------------------------
-        def unpack_dinov2(pack_feat: np.ndarray, N: int, C: int, H: int, W: int) -> np.ndarray:
+        def unpack_dinov2(
+            pack_feat: np.ndarray, N: int, C: int, H: int, W: int
+        ) -> np.ndarray:
             # (N*H, C*W) -> (N, C, H, W)
             return pack_feat.reshape(N, H, C, W).transpose(0, 2, 1, 3)
 
         def fast_hist(label: np.ndarray, pred: np.ndarray, n: int) -> np.ndarray:
             k = (label >= 0) & (label < n)
-            return np.bincount(n * label[k].astype(int) + pred[k].astype(int), minlength=n * n).reshape(n, n)
+            return np.bincount(
+                n * label[k].astype(int) + pred[k].astype(int), minlength=n * n
+            ).reshape(n, n)
 
         def per_class_iu(hist: np.ndarray) -> np.ndarray:
             return np.diag(hist) / (hist.sum(1) + hist.sum(0) - np.diag(hist) + 1e-10)
@@ -185,7 +194,11 @@ class Dinov2FCVQCodec(nn.Module):
 
             @torch.inference_mode()
             def forward(self, x):
-                pads = list(itertools.chain.from_iterable(self._get_pad(m) for m in x.shape[:1:-1]))
+                pads = list(
+                    itertools.chain.from_iterable(
+                        self._get_pad(m) for m in x.shape[:1:-1]
+                    )
+                )
                 return F.pad(x, pads)
 
         class LoadImage:
@@ -208,17 +221,25 @@ class Dinov2FCVQCodec(nn.Module):
         # -------------------------
         # mmseg wrapper methods (minimal)
         # -------------------------
-        def encode_decode_decode(self_seg, crop_feature_list, img_metas, backbone_model, shape_hw):
+        def encode_decode_decode(
+            self_seg, crop_feature_list, img_metas, backbone_model, shape_hw
+        ):
             # align to decode head device (critical for BN/LN)
             head_dev = next(self_seg.decode_head.parameters()).device
 
             # backbone norm may sit elsewhere; move once if needed
-            if hasattr(backbone_model, "norm") and hasattr(backbone_model.norm, "weight"):
+            if hasattr(backbone_model, "norm") and hasattr(
+                backbone_model.norm, "weight"
+            ):
                 if backbone_model.norm.weight.device != head_dev:
                     backbone_model.norm = backbone_model.norm.to(head_dev)
 
-            outputs = [backbone_model.norm(out.to(head_dev)) for out in crop_feature_list]
-            outputs = [out[:, 1 + backbone_model.num_register_tokens :] for out in outputs]
+            outputs = [
+                backbone_model.norm(out.to(head_dev)) for out in crop_feature_list
+            ]
+            outputs = [
+                out[:, 1 + backbone_model.num_register_tokens :] for out in outputs
+            ]
 
             B = outputs[0].shape[0]
             w, h = shape_hw[0], shape_hw[1]
@@ -228,7 +249,9 @@ class Dinov2FCVQCodec(nn.Module):
                     math.ceil(w / backbone_model.patch_size),
                     math.ceil(h / backbone_model.patch_size),
                     -1,
-                ).permute(0, 3, 1, 2).contiguous()
+                )
+                .permute(0, 3, 1, 2)
+                .contiguous()
                 for out in outputs
             ]
 
@@ -240,10 +263,17 @@ class Dinov2FCVQCodec(nn.Module):
             x = tuple(t.to(head_dev) for t in x)
 
             out = self_seg._decode_head_forward_test(x, img_metas)
-            out = resize(input=out, size=shape_hw, mode="bilinear", align_corners=self_seg.align_corners)
+            out = resize(
+                input=out,
+                size=shape_hw,
+                mode="bilinear",
+                align_corners=self_seg.align_corners,
+            )
             return out
 
-        def slide_inference_decode(self_seg, feature_list, img_meta, rescale, backbone_model):
+        def slide_inference_decode(
+            self_seg, feature_list, img_meta, rescale, backbone_model
+        ):
             head_dev = next(self_seg.decode_head.parameters()).device
 
             h_stride, w_stride = self_seg.test_cfg.stride
@@ -255,7 +285,9 @@ class Dinov2FCVQCodec(nn.Module):
             h_grids = max(h_img - h_crop + h_stride - 1, 0) // h_stride + 1
             w_grids = max(w_img - w_crop + w_stride - 1, 0) // w_stride + 1
 
-            preds = torch.zeros((batch_size, num_classes_local, h_img, w_img), device=head_dev)
+            preds = torch.zeros(
+                (batch_size, num_classes_local, h_img, w_img), device=head_dev
+            )
             count_mat = torch.zeros((batch_size, 1, h_img, w_img), device=head_dev)
 
             i = 0
@@ -269,14 +301,22 @@ class Dinov2FCVQCodec(nn.Module):
                     x1 = max(x2 - w_crop, 0)
 
                     crop_seg_logit = self_seg.encode_decode_decode(
-                        feature_list[i], img_meta, backbone_model, self_seg.test_cfg.crop_size
+                        feature_list[i],
+                        img_meta,
+                        backbone_model,
+                        self_seg.test_cfg.crop_size,
                     )
                     if crop_seg_logit.device != head_dev:
                         crop_seg_logit = crop_seg_logit.to(head_dev)
 
                     preds += F.pad(
                         crop_seg_logit,
-                        (int(x1), int(preds.shape[3] - x2), int(y1), int(preds.shape[2] - y2)),
+                        (
+                            int(x1),
+                            int(preds.shape[3] - x2),
+                            int(y1),
+                            int(preds.shape[2] - y2),
+                        ),
                     )
                     count_mat[:, :, y1:y2, x1:x2] += 1
                     i += 1
@@ -295,8 +335,12 @@ class Dinov2FCVQCodec(nn.Module):
                 )
             return preds
 
-        def simple_test_decode(self_seg, feature_list, img_meta, backbone_model, rescale=True):
-            seg_logit = self_seg.slide_inference_decode(feature_list, img_meta, rescale, backbone_model=backbone_model)
+        def simple_test_decode(
+            self_seg, feature_list, img_meta, backbone_model, rescale=True
+        ):
+            seg_logit = self_seg.slide_inference_decode(
+                feature_list, img_meta, rescale, backbone_model=backbone_model
+            )
             output = F.softmax(seg_logit, dim=1)
 
             if img_meta[0]["flip"]:
@@ -353,7 +397,9 @@ class Dinov2FCVQCodec(nn.Module):
         # -------------------------
         backbone_model = dinov2_vitg14(pretrained=True).to(device_t).eval()
 
-        cfg = mmcv.Config.fromfile(f"/code/examples/fcvq/cfg/dinov2_vitg14_{head_dataset}_{head_type}_config.py")
+        cfg = mmcv.Config.fromfile(
+            f"{PROJECT_HOME}/examples/fcvq/cfg/dinov2_vitg14_{head_dataset}_{head_type}_config.py"
+        )
         segm = create_segmenter(cfg, backbone_model=backbone_model)
 
         # load seg head weights (CRITICAL: map to device_t, not cpu)
@@ -417,7 +463,9 @@ class Dinov2FCVQCodec(nn.Module):
                     [aug_t[vi][cj].unsqueeze(0) for cj in range(aug_t.shape[1])]
                     for vi in range(aug_t.shape[0])
                 ]
-                pred = segm.simple_test_decode(aug_list, img_metas, backbone_model, rescale=True)
+                pred = segm.simple_test_decode(
+                    aug_list, img_metas, backbone_model, rescale=True
+                )
                 hist += fast_hist(array_label, pred[0], num_classes)
                 mse_list.append(float(np.square(org_feat - aug_np).mean()))
 
@@ -437,7 +485,9 @@ class Dinov2FCVQCodec(nn.Module):
                     for vi in range(recon.shape[0])
                 ]
 
-                pred_recon = segm.simple_test_decode(aug_list_recon, img_metas, backbone_model, rescale=True)
+                pred_recon = segm.simple_test_decode(
+                    aug_list_recon, img_metas, backbone_model, rescale=True
+                )
                 hist_recon += fast_hist(array_label, pred_recon[0], num_classes)
 
                 recon_np = recon.detach().cpu().numpy()
@@ -451,6 +501,8 @@ class Dinov2FCVQCodec(nn.Module):
             miou_ori=all_miou,
             miou_recon=all_miou_recon,
             mse_ori=float(np.mean(mse_list)) if mse_list else float("nan"),
-            mse_recon=float(np.mean(mse_list_recon)) if mse_list_recon else float("nan"),
+            mse_recon=float(np.mean(mse_list_recon))
+            if mse_list_recon
+            else float("nan"),
             bpp_avg=bpp_average,
         )
