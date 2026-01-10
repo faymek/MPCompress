@@ -6,21 +6,17 @@ import torch
 import numpy as np
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.tensorboard import SummaryWriter
-tb_logger = None
-
 from mpcompress.models.fcvq import Dinov2FCVQCodec
-import warnings
-warnings.filterwarnings('ignore')
-warnings.filterwarnings("ignore", category=FutureWarning)
-
 from dataset_cls import Dinov2DatasetTrain
 from tqdm import tqdm
-
-os.environ["TORCH_HOME"] = "/data/qiaoxichen/model/dinov2"
+from dotenv import load_dotenv
+tb_logger = None
+load_dotenv()
+PROJECT_HOME = os.getenv("PROJECT_HOME")
 
 
 def train_one_epoch(codec, loss_functioner, train_loader, optimizer, epoch):
-    device = 'cuda'
+    device = "cuda"
     codec.train()
     codec.to(device)
 
@@ -39,34 +35,36 @@ def train_one_epoch(codec, loss_functioner, train_loader, optimizer, epoch):
 
         steps = epoch * len(train_loader) + batch_idx
         if steps % 1 == 0:
-            tb_logger.add_scalar('lr', optimizer.param_groups[0]['lr'], steps)
-            tb_logger.add_scalar('Train mse', mse_loss, steps)
-            tb_logger.add_scalar('Train rate', rate, steps)
-            tb_logger.add_scalar('Train loss', loss, steps)
+            tb_logger.add_scalar("lr", optimizer.param_groups[0]["lr"], steps)
+            tb_logger.add_scalar("Train mse", mse_loss, steps)
+            tb_logger.add_scalar("Train rate", rate, steps)
+            tb_logger.add_scalar("Train loss", loss, steps)
 
             print(
                 f"\tTrain epoch {epoch}"
                 f"\tTrain batch {batch_idx}: ["
-                f"\t{batch_idx* train_loader.batch_size}/{len(train_loader.dataset)}"
-                f"\t({100. * batch_idx / len(train_loader):.0f}%)]\n"
-                f'\tTrain mse loss: {mse_loss.item():.4f} |\n'
-                f'\tTrain rate: {rate.item():.4f} |\n'
-                f'\tTrain rd loss: {rd_loss.item():.4f} |'
+                f"\t{batch_idx * train_loader.batch_size}/{len(train_loader.dataset)}"
+                f"\t({100.0 * batch_idx / len(train_loader):.0f}%)]\n"
+                f"\tTrain mse loss: {mse_loss.item():.4f} |\n"
+                f"\tTrain rate: {rate.item():.4f} |\n"
+                f"\tTrain rd loss: {rd_loss.item():.4f} |"
             )
 
 
 def validate_epoch(epoch, loss_functioner, codec):
-    device = 'cuda'
+    device = "cuda"
     codec.to(device)
     codec.eval()
 
-    eval_acc = 0.
-    eval_acc_ori = 0.
-    eval_mse = 0.
-    eval_rate = 0.
+    eval_acc = 0.0
+    eval_acc_ori = 0.0
+    eval_mse = 0.0
+    eval_rate = 0.0
 
-    raw_dir = '/data/qiaoxichen/model/dinov2_dataset/cls/test'
-    with open('/code/examples/fcvq/cfg/imagenet_selected_label500.txt', "r") as f:
+    raw_dir = f"{PROJECT_HOME}/features/fcvq/cls/test"
+    with open(
+        f"{PROJECT_HOME}/examples/fcvq/cfg/imagenet_selected_label500.txt", "r"
+    ) as f:
         data = f.readlines()
 
     with torch.no_grad():
@@ -76,8 +74,10 @@ def validate_epoch(epoch, loss_functioner, codec):
             y = x.split()[1]
             batch_y = torch.tensor([int(y)]).to(device)
 
-            aug_feature_dq_list_numpy = np.load(f'{raw_dir}/{file_name}.npy')
-            aug_feature_dq_list_tensor = torch.from_numpy(aug_feature_dq_list_numpy).to(device)
+            aug_feature_dq_list_numpy = np.load(f"{raw_dir}/{file_name}.npy")
+            aug_feature_dq_list_tensor = torch.from_numpy(aug_feature_dq_list_numpy).to(
+                device
+            )
             feat_in = aug_feature_dq_list_tensor.squeeze(0)  # [257,1536]
 
             feat_recon_squeeze, mse_loss, rd_loss, rate, encoding_inds = codec(feat_in)
@@ -97,7 +97,7 @@ def validate_epoch(epoch, loss_functioner, codec):
             eval_acc += (pred == batch_y).sum().item()
             eval_acc_ori += (pred_ori == batch_y).sum().item()
 
-            org_feat = np.load(f'{raw_dir}/{file_name}.npy')
+            org_feat = np.load(f"{raw_dir}/{file_name}.npy")
             mse = (np.square(org_feat - feat_recon_npy)).mean()
             eval_mse += mse
             eval_rate += rate
@@ -109,16 +109,18 @@ def validate_epoch(epoch, loss_functioner, codec):
     eval_rate = eval_rate / num
 
     step = epoch
-    tb_logger.add_scalar('eval_mse', eval_mse, step)
-    tb_logger.add_scalar('eval_acc', eval_acc, step)
-    tb_logger.add_scalar('eval_acc_ori', eval_acc_ori, step)
-    tb_logger.add_scalar('eval_rate', eval_rate, step)
+    tb_logger.add_scalar("eval_mse", eval_mse, step)
+    tb_logger.add_scalar("eval_acc", eval_acc, step)
+    tb_logger.add_scalar("eval_acc_ori", eval_acc_ori, step)
+    tb_logger.add_scalar("eval_rate", eval_rate, step)
 
-    print('len test dataset: ', num)
-    print(f"\t=======MSE: {eval_mse:.6f}=======\n"
-          f"\t=======rate: {eval_rate:.6f}=======\n"
-          f"\t=====Eval Accuracy: {eval_acc:.6f}=====\n"
-          f"\t==Original Feature Eval Accuracy: {eval_acc_ori:.6f}==\n")
+    print("len test dataset: ", num)
+    print(
+        f"\t=======MSE: {eval_mse:.6f}=======\n"
+        f"\t=======rate: {eval_rate:.6f}=======\n"
+        f"\t=====Eval Accuracy: {eval_acc:.6f}=====\n"
+        f"\t==Original Feature Eval Accuracy: {eval_acc_ori:.6f}==\n"
+    )
 
     return eval_mse, eval_acc, eval_acc_ori
 
@@ -135,18 +137,20 @@ def parse_args(argv):
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--save", action="store_true", default=True)
     parser.add_argument("--seed", type=int, default=3407)
-    parser.add_argument("--checkpoint", type=str, default='/output/')
-    parser.add_argument('--embedding_dim', type=int, default=32)
-    parser.add_argument('--num_embeddings', type=int, default=2)
-    parser.add_argument('--num_chunks', type=int, default=32)
-    parser.add_argument('--lmbda', type=float, default=1.)
+    parser.add_argument(
+        "--checkpoint", type=str, default=f"{PROJECT_HOME}/runs/fcvq/cls/"
+    )
+    parser.add_argument("--embedding_dim", type=int, default=32)
+    parser.add_argument("--num_embeddings", type=int, default=2)
+    parser.add_argument("--num_chunks", type=int, default=32)
+    parser.add_argument("--lmbda", type=float, default=1.0)
     return parser.parse_args(argv)
 
 
 def main(argv):
     args = parse_args(argv)
     global tb_logger
-    tb_logger = SummaryWriter(os.path.join('/output/', 'events'))
+    tb_logger = SummaryWriter(os.path.join(args.checkpoint, "events"))
 
     if args.seed is not None:
         torch.manual_seed(args.seed)
@@ -159,7 +163,7 @@ def main(argv):
         torch.backends.cudnn.benchmark = False
         torch.backends.cudnn.enabled = False
 
-    device = 'cuda'
+    device = "cuda"
 
     codec = Dinov2FCVQCodec(
         fcvq_kwargs=dict(
@@ -179,7 +183,7 @@ def main(argv):
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.num_workers,
-        pin_memory=True
+        pin_memory=True,
     )
 
     optimizer = torch.optim.Adam(codec.fcvq.parameters(), lr=args.lr)
@@ -190,9 +194,9 @@ def main(argv):
         os.makedirs(args.checkpoint)
 
     for epoch in range(1, args.epochs + 1):
-        if optimizer.param_groups[0]['lr'] < 1e-6:
-            optimizer.param_groups[0]['lr'] = 1e-6
-            print('=======set min lr to 1e-6========')
+        if optimizer.param_groups[0]["lr"] < 1e-6:
+            optimizer.param_groups[0]["lr"] = 1e-6
+            print("=======set min lr to 1e-6========")
 
         print(f"Learning rate: {optimizer.param_groups[0]['lr']:.5f}")
         train_one_epoch(codec, loss_functioner, train_loader, optimizer, epoch)
@@ -210,13 +214,21 @@ def main(argv):
                     "optimizer": optimizer.state_dict(),
                 },
                 True,
-                filename=args.checkpoint + 'epoch_' + str(epoch) +
-                         'num_' + str(args.num_embeddings) +
-                         'chunk_' + str(args.num_chunks) + '.pth.tar'
+                filename=args.checkpoint
+                + "epoch_"
+                + str(epoch)
+                + "num_"
+                + str(args.num_embeddings)
+                + "chunk_"
+                + str(args.num_chunks)
+                + ".pth.tar",
             )
-            print(f'\tTest ACC:{eval_acc:.4f}|'
-                  f'\tTest ACC ORI:{eval_acc_ori:.4f}|'
-                  f'\tsave last epoch model of epoch: {epoch}')
+            print(
+                f"\tTest ACC:{eval_acc:.4f}|"
+                f"\tTest ACC ORI:{eval_acc_ori:.4f}|"
+                f"\tsave last epoch model of epoch: {epoch}"
+            )
+
 
 if __name__ == "__main__":
     main(sys.argv[1:])

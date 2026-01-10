@@ -1,13 +1,15 @@
 import os
 import sys
 import argparse
-os.environ["TORCH_HOME"] = "/data/qiaoxichen/model/dinov2"
-
 import torch
 import numpy as np
 from tqdm import tqdm
 from mpcompress.models.fcvq import Dinov2FCVQCodec
 import time
+from dotenv import load_dotenv
+
+load_dotenv()
+PROJECT_HOME = os.getenv("PROJECT_HOME")
 
 
 def test_epoch(codec, vq_path):
@@ -15,13 +17,15 @@ def test_epoch(codec, vq_path):
     device = next(codec.parameters()).device
     codec.load_state_dict_compressor(torch.load(vq_path)["vqvae_state_dict"])
 
-    eval_acc = 0.
-    eval_acc_ori = 0.
-    eval_mse = 0.
-    eval_rate = 0.
+    eval_acc = 0.0
+    eval_acc_ori = 0.0
+    eval_mse = 0.0
+    eval_rate = 0.0
 
-    raw_dir = '/data/qiaoxichen/model/dinov2_dataset/cls/test'
-    with open('/code/examples/fcvq/imagenet_selected_label500.txt', "r") as f:
+    raw_dir = f"{PROJECT_HOME}/features/fcvq/cls/test"
+    with open(
+        f"{PROJECT_HOME}/examples/fcvq/cfg/imagenet_selected_label500.txt", "r"
+    ) as f:
         data = f.readlines()
 
     num = 0
@@ -33,7 +37,7 @@ def test_epoch(codec, vq_path):
         y = x.split()[1]
         batch_y = torch.tensor([int(y)]).to(device)
 
-        feat_np = np.load(f'{raw_dir}/{file_name}.npy')
+        feat_np = np.load(f"{raw_dir}/{file_name}.npy")
         feat_t = torch.from_numpy(feat_np).to(device)
         feat_in = feat_t.squeeze(0)  # [257,1536]
 
@@ -41,16 +45,16 @@ def test_epoch(codec, vq_path):
             start_enc = time.time()
             coded_unit = codec.compress(feat_in)
             strings = coded_unit["strings"]["indices"][0]
-            feat_shape = coded_unit["pstate"]["feat_shape"]   
+            feat_shape = coded_unit["pstate"]["feat_shape"]
             end_enc = time.time()
-            enc_time_total += (end_enc - start_enc)
+            enc_time_total += end_enc - start_enc
 
             bit_stream_size = sum(len(s) for s in strings) * 8
 
             start_dec = time.time()
             feat_hat = codec.decompress(strings, feat_shape)
             end_dec = time.time()
-            dec_time_total += (end_dec - start_dec)
+            dec_time_total += end_dec - start_dec
 
             feat_recon = feat_hat.unsqueeze(0)
             feat_recon_npy = feat_recon.cpu().numpy()
@@ -77,10 +81,12 @@ def test_epoch(codec, vq_path):
     eval_acc_ori = eval_acc_ori / num
     eval_rate = eval_rate / (num * 257 * 1536)
 
-    print(f"\t=======MSE: {eval_mse:.6f}=======\n"
-          f"\t=======rate: {eval_rate:.6f}=======\n"
-          f"\t=====Eval Accuracy: {eval_acc:.6f}=====\n"
-          f"\t==Original Feature Eval Accuracy: {eval_acc_ori:.6f}==\n")
+    print(
+        f"\t=======MSE: {eval_mse:.6f}=======\n"
+        f"\t=======rate: {eval_rate:.6f}=======\n"
+        f"\t=====Eval Accuracy: {eval_acc:.6f}=====\n"
+        f"\t==Original Feature Eval Accuracy: {eval_acc_ori:.6f}==\n"
+    )
     print(f"Average Encoding Time per Image: {enc_time_total / num:.4f} s")
     print(f"Average Decoding Time per Image: {dec_time_total / num:.4f} s")
     print("=============================================\n")
@@ -88,11 +94,15 @@ def test_epoch(codec, vq_path):
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description="Example testing script.")
-    parser.add_argument('--vq_path', type=str, default='/data/qiaoxichen/model/ECVQ/checkpoint_cls/ecvq_ckpt/epoch_100num_8chunk_1.pth.tar')
-    parser.add_argument('--embedding_dim', type=int, default=64)
-    parser.add_argument('--num_embeddings', type=int, default=8)
-    parser.add_argument('--num_chunks', type=int, default=1)
-    parser.add_argument('--lmbda', type=float, default=1.)
+    parser.add_argument(
+        "--vq_path",
+        type=str,
+        default=f"{PROJECT_HOME}/weights/fcvq/cls/epoch_100num_8chunk_1.pth.tar",
+    )
+    parser.add_argument("--embedding_dim", type=int, default=64)
+    parser.add_argument("--num_embeddings", type=int, default=8)
+    parser.add_argument("--num_chunks", type=int, default=1)
+    parser.add_argument("--lmbda", type=float, default=1.0)
     return parser.parse_args(argv)
 
 
@@ -116,5 +126,5 @@ def main(argv):
     test_epoch(codec, args.vq_path)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main(sys.argv[1:])

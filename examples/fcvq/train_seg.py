@@ -6,12 +6,12 @@ import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
 from torch.optim.lr_scheduler import StepLR
-from tqdm import tqdm
-
 from dataset_seg import Dinov2DatasetTrain
 from mpcompress.models.fcvq import Dinov2FCVQCodec
+from dotenv import load_dotenv
 
-
+load_dotenv()
+PROJECT_HOME = os.getenv("PROJECT_HOME")
 tb_logger = None
 
 
@@ -33,10 +33,14 @@ def parse_args(argv):
     p.add_argument("--lmbda", type=float, default=1.0)
 
     # validate (seg eval inside codec)
-    p.add_argument("--list_file", type=str, default="/code/examples/fcvq/cfg/val_100.txt")
-    p.add_argument("--img_root", type=str, default="/data/bitahub/VOC2012")
-    p.add_argument("--feat_dir", type=str, default="/data/qiaoxichen/model/dinov2_dataset/seg/test")
-    p.add_argument("--feat_aug_dir", type=str, default="/data/qiaoxichen/model/dinov2_dataset/seg/test")
+    p.add_argument(
+        "--list_file", type=str, default=f"{PROJECT_HOME}/examples/fcvq/cfg/val_100.txt"
+    )
+    p.add_argument("--img_root", type=str, default=f"{PROJECT_HOME}/data/VOC2012")
+    p.add_argument("--feat_dir", type=str, default=f"{PROJECT_HOME}/features/seg/test")
+    p.add_argument(
+        "--feat_aug_dir", type=str, default=f"{PROJECT_HOME}/features/seg/test"
+    )
     p.add_argument("--head_dataset", type=str, default="voc2012")
     p.add_argument("--head_type", type=str, default="linear")
     p.add_argument("--num_classes", type=int, default=21)
@@ -83,7 +87,9 @@ def train_one_epoch(codec: Dinov2FCVQCodec, loader, optimizer, epoch: int):
         tb_logger.add_scalar("train_rate", rate.item(), steps)
 
         if batch_idx % 10 == 0:
-            print(f"[train] epoch={epoch} step={batch_idx}/{len(loader)} rd={rd_loss.item():.4f} rate={rate.item():.4f}")
+            print(
+                f"[train] epoch={epoch} step={batch_idx}/{len(loader)} rd={rd_loss.item():.4f} rate={rate.item():.4f}"
+            )
 
 
 @torch.no_grad()
@@ -148,7 +154,6 @@ def main(argv):
     optimizer = torch.optim.Adam(codec.fcvq.parameters(), lr=args.lr)
     scheduler = StepLR(optimizer, step_size=20, gamma=0.9)
 
-    best_miou = -1.0
     for epoch in range(1, args.epochs + 1):
         # validate first (same behavior as your old script)
         metrics = validate_epoch(codec, args, epoch)
