@@ -2,6 +2,7 @@ import math
 import torch.nn.functional as F
 import discrete_entropy.ops as ops
 
+
 class Softmax:
     def __init__(self, logits):
         super().__init__()

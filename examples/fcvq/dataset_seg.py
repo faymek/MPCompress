@@ -1,16 +1,19 @@
 import os
-import torch
 from torch.utils.data import Dataset
-from torchvision import transforms, datasets
-
+from torchvision import datasets
+from dotenv import load_dotenv
 import numpy as np
+
+load_dotenv()
+PROJECT_HOME = os.getenv("PROJECT_HOME")
+
 
 class Dinov2DatasetTrain(Dataset):
     def __init__(self, train=True):
         if train:
-            data_dirs = ['/data/qiaoxichen/model/dinov2_dataset/seg/train']
+            data_dirs = [f"{PROJECT_HOME}/features/fcvq/seg/train"]
         else:
-            data_dirs = ['/data/qiaoxichen/model/dinov2_dataset/seg/test']
+            data_dirs = [f"{PROJECT_HOME}/features/fcvq/seg/test"]
 
         self.file_list = []
         for d in data_dirs:
@@ -22,30 +25,18 @@ class Dinov2DatasetTrain(Dataset):
         return len(self.file_list)
 
     def __getitem__(self, index):
-
         file_path = self.file_list[index]
         feat = np.load(file_path)
         feat = feat[0]
         file_name = os.path.basename(file_path)
         return feat, file_name
 
+
 class Dinov2DatasetTest(datasets.ImageFolder):
-
-
-    def __init__(
-            self,
-            root: str,
-            transform=None,
-            **kwargs
-    ):
-        super().__init__(
-            root,
-            transform,
-            **kwargs
-        )
+    def __init__(self, root: str, transform=None, **kwargs):
+        super().__init__(root, transform, **kwargs)
 
     def __getitem__(self, index: int):
-        
         path, target = self.samples[index]
         sample = self.loader(path)
         if self.transform is not None:
@@ -54,4 +45,3 @@ class Dinov2DatasetTest(datasets.ImageFolder):
             target = self.target_transform(target)
 
         return sample, target, path
-
