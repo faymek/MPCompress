@@ -4,7 +4,7 @@ import torch.nn as nn
 from einops import rearrange
 import timm
 import torchvision.transforms as transforms
-from mpcompress.backbone.vqgan.vq_model import VQModel  # type: ignore
+from mpcompress.backbone.vqgan.vq_model import VQModel
 
 
 def parse_dtype(dtype):
@@ -49,7 +49,6 @@ def parse_dtype(dtype):
         raise ValueError(
             f"autocast_dtype must be a string or torch.dtype, got: {type(dtype)}"
         )
-
 
 class VqganBackbone(nn.Module):
     """VQGAN-based backbone for image encoding and decoding.

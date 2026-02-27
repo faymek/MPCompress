@@ -1,0 +1,64 @@
+# RFC/MLoRE PASCAL Context 评估配置
+# 用于评估 PASCAL Context 数据集上的多任务压缩性能
+
+# ==================== 模型配置 ====================
+model:
+  type: MLoREFrameCodec
+  stage: stage2        # stage0(无压缩), stage1(压缩训练), stage2(Mona微调)
+  pretrained: true
+  img_size: [512, 512]
+  drop_path_rate: 0.15
+  
+  # MLoRE backbone 参数
+  final_embed_dim: 640
+  rank_list: [64, 72, 80, 88, 96, 128, 128, 160, 192, 224, 256, 256, 256, 288, 320]
+  spe_rank: 64
+  topk: 9
+  pre_softmax: false
+
+# ==================== 任务配置 ====================
+# PASCAL Context 支持的任务
+tasks:
+  NAMES: [semseg, edge, normals, sal, human_parts]
+  NUM_OUTPUT:
+    semseg: 21
+    edge: 1
+    normals: 3
+    sal: 2
+    human_parts: 7
+
+# ==================== 数据集路径覆盖 ====================
+datasets:
+  pascal_context_val:
+    root: /home/sihang/MPCompress-merge-251229/PASCALContext  # 请修改为实际路径
+
+# ==================== 检查点加载 ====================
+load:
+  path: ""  # 模型权重路径（命令行--checkpoint覆盖）
+  strict: false
+  rules:
+    # 权重键名映射规则（如果需要）
+    # - ["old_prefix", "new_prefix"]
+    # - ["module.", ""]  # 移除DDP前缀
+
+# ==================== 评估参数覆盖 ====================
+args:
+  real: true           # 使用实际熵编码
+  verbose: false
+  output_dir: ./eval_results/rfc_pascal
+  save_predictions: true
+
+# ==================== 损失权重（用于联合评估） ====================
+loss_weights:
+  semseg: 1.0
+  edge: 50.0
+  normals: 10.0
+  sal: 5.0
+  human_parts: 2.0
+  bpp_loss: 1.0
+  mse_loss: 100.0
+  load_balancing: 0.0001
+
+
+
+
