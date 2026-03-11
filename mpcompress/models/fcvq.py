@@ -47,7 +47,7 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
-PROJECT_HOME = os.getenv("PROJECT_HOME")
+PROJECT_ROOT = os.getenv("PROJECT_ROOT")
 
 
 class Dinov2FCVQCodec(nn.Module):
@@ -136,10 +136,10 @@ class Dinov2FCVQCodec(nn.Module):
         load_vq: bool = False,
         vq_path: Optional[str] = None,
         *,
-        list_file: str = f"{PROJECT_HOME}/examples/fcvq/cfg/val_100.txt",
-        img_root: str = f"{PROJECT_HOME}/data/VOC2012",
-        feat_dir: str = f"{PROJECT_HOME}/features/fcvq/seg/test",
-        feat_aug_dir: str = f"{PROJECT_HOME}/features/fcvq/seg/test",
+        list_file: str = f"{PROJECT_ROOT}/examples/fcvq/cfg/val_100.txt",
+        img_root: str = f"{PROJECT_ROOT}/data/VOC2012",
+        feat_dir: str = f"{PROJECT_ROOT}/features/fcvq/seg/test",
+        feat_aug_dir: str = f"{PROJECT_ROOT}/features/fcvq/seg/test",
         head_dataset: str = "voc2012",
         head_type: str = "linear",
         num_classes: int = 21,
@@ -398,7 +398,7 @@ class Dinov2FCVQCodec(nn.Module):
         backbone_model = dinov2_vitg14(pretrained=True).to(device_t).eval()
 
         cfg = mmcv.Config.fromfile(
-            f"{PROJECT_HOME}/examples/fcvq/cfg/dinov2_vitg14_{head_dataset}_{head_type}_config.py"
+            f"{PROJECT_ROOT}/examples/fcvq/cfg/dinov2_vitg14_{head_dataset}_{head_type}_config.py"
         )
         segm = create_segmenter(cfg, backbone_model=backbone_model)
 

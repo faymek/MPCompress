@@ -5,15 +5,15 @@ from dotenv import load_dotenv
 import numpy as np
 
 load_dotenv()
-PROJECT_HOME = os.getenv("PROJECT_HOME")
+PROJECT_ROOT = os.getenv("PROJECT_ROOT")
 
 
 class Dinov2DatasetTrain(Dataset):
     def __init__(self, train=True):
         if train:
-            data_dirs = [f"{PROJECT_HOME}/features/fcvq/seg/train"]
+            data_dirs = [f"{PROJECT_ROOT}/features/fcvq/seg/train"]
         else:
-            data_dirs = [f"{PROJECT_HOME}/features/fcvq/seg/test"]
+            data_dirs = [f"{PROJECT_ROOT}/features/fcvq/seg/test"]
 
         self.file_list = []
         for d in data_dirs:

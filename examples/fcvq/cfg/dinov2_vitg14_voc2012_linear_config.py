@@ -2,10 +2,10 @@ from dotenv import load_dotenv
 import os
 
 load_dotenv()
-PROJECT_HOME = os.getenv("PROJECT_HOME")
+PROJECT_ROOT = os.getenv("PROJECT_ROOT")
 
 dataset_type = "PascalVOCDataset"
-data_root = os.path.join(PROJECT_HOME, "data", "VOC2012")
+data_root = os.path.join(PROJECT_ROOT, "data", "VOC2012")
 img_norm_cfg = dict(
     mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True
 )
@@ -181,7 +181,7 @@ model = dict(
 auto_resume = True
 gpu_ids = range(0, 8)
 work_dir = os.path.join(
-    PROJECT_HOME,
+    PROJECT_ROOT,
     "runs",
     "/checkpoint/dino/evaluations/segmentation/dinov2_vitg14_voc2012_linear",
 )

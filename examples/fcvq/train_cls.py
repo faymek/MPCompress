@@ -12,7 +12,7 @@ from tqdm import tqdm
 from dotenv import load_dotenv
 tb_logger = None
 load_dotenv()
-PROJECT_HOME = os.getenv("PROJECT_HOME")
+PROJECT_ROOT = os.getenv("PROJECT_ROOT")
 
 
 def train_one_epoch(codec, loss_functioner, train_loader, optimizer, epoch):
@@ -61,9 +61,9 @@ def validate_epoch(epoch, loss_functioner, codec):
     eval_mse = 0.0
     eval_rate = 0.0
 
-    raw_dir = f"{PROJECT_HOME}/features/fcvq/cls/test"
+    raw_dir = f"{PROJECT_ROOT}/features/fcvq/cls/test"
     with open(
-        f"{PROJECT_HOME}/examples/fcvq/cfg/imagenet_selected_label500.txt", "r"
+        f"{PROJECT_ROOT}/examples/fcvq/cfg/imagenet_selected_label500.txt", "r"
     ) as f:
         data = f.readlines()
 
@@ -138,7 +138,7 @@ def parse_args(argv):
     parser.add_argument("--save", action="store_true", default=True)
     parser.add_argument("--seed", type=int, default=3407)
     parser.add_argument(
-        "--checkpoint", type=str, default=f"{PROJECT_HOME}/runs/fcvq/cls/"
+        "--checkpoint", type=str, default=f"{PROJECT_ROOT}/runs/fcvq/cls/"
     )
     parser.add_argument("--embedding_dim", type=int, default=32)
     parser.add_argument("--num_embeddings", type=int, default=2)

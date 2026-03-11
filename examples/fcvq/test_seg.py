@@ -8,7 +8,7 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
-PROJECT_HOME = os.getenv("PROJECT_HOME")
+PROJECT_ROOT = os.getenv("PROJECT_ROOT")
 
 
 def parse_args(argv):
@@ -20,7 +20,7 @@ def parse_args(argv):
     parser.add_argument(
         "--vq_path",
         type=str,
-        default=f"{PROJECT_HOME}/weights/fcvq/seg/epoch_100num_128dim_16chunk_1.pth.tar",
+        default=f"{PROJECT_ROOT}/weights/fcvq/seg/epoch_100num_128dim_16chunk_1.pth.tar",
     )
     parser.add_argument("--num_chunks", type=int, default=1)
     parser.add_argument("--lmbda", type=float, default=1.0)

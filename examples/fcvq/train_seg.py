@@ -11,7 +11,7 @@ from mpcompress.models.fcvq import Dinov2FCVQCodec
 from dotenv import load_dotenv
 
 load_dotenv()
-PROJECT_HOME = os.getenv("PROJECT_HOME")
+PROJECT_ROOT = os.getenv("PROJECT_ROOT")
 tb_logger = None
 
 
@@ -34,12 +34,12 @@ def parse_args(argv):
 
     # validate (seg eval inside codec)
     p.add_argument(
-        "--list_file", type=str, default=f"{PROJECT_HOME}/examples/fcvq/cfg/val_100.txt"
+        "--list_file", type=str, default=f"{PROJECT_ROOT}/examples/fcvq/cfg/val_100.txt"
     )
-    p.add_argument("--img_root", type=str, default=f"{PROJECT_HOME}/data/VOC2012")
-    p.add_argument("--feat_dir", type=str, default=f"{PROJECT_HOME}/features/seg/test")
+    p.add_argument("--img_root", type=str, default=f"{PROJECT_ROOT}/data/VOC2012")
+    p.add_argument("--feat_dir", type=str, default=f"{PROJECT_ROOT}/features/seg/test")
     p.add_argument(
-        "--feat_aug_dir", type=str, default=f"{PROJECT_HOME}/features/seg/test"
+        "--feat_aug_dir", type=str, default=f"{PROJECT_ROOT}/features/seg/test"
     )
     p.add_argument("--head_dataset", type=str, default="voc2012")
     p.add_argument("--head_type", type=str, default="linear")

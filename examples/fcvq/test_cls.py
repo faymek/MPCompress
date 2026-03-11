@@ -9,7 +9,7 @@ import time
 from dotenv import load_dotenv
 
 load_dotenv()
-PROJECT_HOME = os.getenv("PROJECT_HOME")
+PROJECT_ROOT = os.getenv("PROJECT_ROOT")
 
 
 def test_epoch(codec, vq_path):
@@ -22,9 +22,9 @@ def test_epoch(codec, vq_path):
     eval_mse = 0.0
     eval_rate = 0.0
 
-    raw_dir = f"{PROJECT_HOME}/features/fcvq/cls/test"
+    raw_dir = f"{PROJECT_ROOT}/features/fcvq/cls/test"
     with open(
-        f"{PROJECT_HOME}/examples/fcvq/cfg/imagenet_selected_label500.txt", "r"
+        f"{PROJECT_ROOT}/examples/fcvq/cfg/imagenet_selected_label500.txt", "r"
     ) as f:
         data = f.readlines()
 
@@ -97,7 +97,7 @@ def parse_args(argv):
     parser.add_argument(
         "--vq_path",
         type=str,
-        default=f"{PROJECT_HOME}/weights/fcvq/cls/epoch_100num_8chunk_1.pth.tar",
+        default=f"{PROJECT_ROOT}/weights/fcvq/cls/epoch_100num_8chunk_1.pth.tar",
     )
     parser.add_argument("--embedding_dim", type=int, default=64)
     parser.add_argument("--num_embeddings", type=int, default=8)
