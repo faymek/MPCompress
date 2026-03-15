@@ -12,7 +12,7 @@ from mpcompress.utils.common import (
     dump_json,
     set_torch_env,
 )
-from mpcompress.latent_codecs.dcvc_base import DmcCompressionModel
+from mpcompress.entropy_models.dcvc_base import DmcCompressionModel
 from mpcompress.models.dcvcrt.pframe import DMCP
 from mpcompress.models.dcvcrt.iframe import DMCI
 from mpcompress.models.dcvcrt.video import DCVC_RT_Video

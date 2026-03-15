@@ -9,7 +9,7 @@ from torch import nn
 import torch.nn.functional as F
 
 from compressai.models.base import CompressionModel
-from mpcompress.latent_codecs.dcvc_base import DmcCompressionModel
+from mpcompress.entropy_models.dcvc_base import DmcCompressionModel
 from mpcompress.utils.registery import instantiate_class, register
 
 from mpcompress.models.dcvcrt.pframe import DMCP

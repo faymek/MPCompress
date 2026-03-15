@@ -5,7 +5,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from mpcompress.latent_codecs.dcvc_base import DmcCompressionModel
+from mpcompress.entropy_models.dcvc_base import DmcCompressionModel
 from mpcompress.layers.dcvc_layers import (
     DepthConvBlock,
     ResidualBlockUpsample,

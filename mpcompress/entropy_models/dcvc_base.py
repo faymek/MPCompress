@@ -13,7 +13,7 @@ from mpcompress.layers.dcvc_cuda_inference import (
     restore_y_4x,
     clamp_reciprocal_with_quant,
 )
-from mpcompress.latent_codecs.dcvc_entropy import (
+from .dcvc_entropy import (
     VbrFactorizedPrior,
     GaussianEncoder,
     EntropyCoder,
