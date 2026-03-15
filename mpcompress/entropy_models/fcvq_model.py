@@ -6,8 +6,7 @@ import torch.nn.functional as F
 from abc import abstractmethod
 import time
 
-from fcvq_entropy.distribution.common import Softmax
-from fcvq_entropy.entropy_model.discrete import DiscreteEntropyModel
+from .fcvq_entropy import SoftmaxPrior, DiscreteEntropyModel
 import math
 
 
@@ -283,6 +282,7 @@ class FCVQ(BaseVAE):
         embedding_dim: int,
         num_chunks: int,
         lmbda: float,
+        ckpt_path: str = None,
         **kwargs,
     ) -> None:
         super(FCVQ, self).__init__()
@@ -292,7 +292,7 @@ class FCVQ(BaseVAE):
         self.lmbda = lmbda
         self.num_chunks = num_chunks
         self.logits = nn.Parameter(torch.zeros(1, self.num_embeddings))
-        self.uncondi_entropy_model = DiscreteEntropyModel(prior=Softmax(self.logits))
+        self.uncondi_entropy_model = DiscreteEntropyModel(prior=SoftmaxPrior(self.logits))
         self.vq_modules = nn.ModuleList(
             [
                 VectorQuantizer(
@@ -305,6 +305,12 @@ class FCVQ(BaseVAE):
                 for _ in range(self.num_chunks)
             ]
         )
+        if ckpt_path:
+            ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+            if isinstance(ckpt, dict) and "vqvae_state_dict" in ckpt:
+                self.load_state_dict(ckpt["vqvae_state_dict"])
+            else:
+                self.load_state_dict(ckpt)
 
     # @autocast()
     def forward(self, input: Tensor, **kwargs) -> List[Tensor]:

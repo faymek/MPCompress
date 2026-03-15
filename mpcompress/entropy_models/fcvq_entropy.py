@@ -1,4 +1,6 @@
 """
+FCVQ entropy model: Softmax prior and discrete entropy coding.
+
 Reference:
     [1] https://github.com/InterDigitalInc/CompressAI/blob/master/compressai/entropy_models/entropy_models.py
     [2] https://github.com/USTC-IMCL/NVTC/blob/main/image/nvtc_image/entropy_model/discrete.py
@@ -6,10 +8,13 @@ Reference:
 
 import abc
 import math
-import torch
-import torch.nn as nn
 
 import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+from mpcompress.ops import lower_bound
 
 try:
     from compressai._CXX import pmf_to_quantized_cdf as _pmf_to_quantized_cdf
@@ -17,6 +22,46 @@ try:
 except (ImportError, ModuleNotFoundError):
     _pmf_to_quantized_cdf = None
     ans = None
+
+
+class SoftmaxPrior:
+    def __init__(self, logits):
+        super().__init__()
+        self.batch_shape = logits.shape[:-1]
+        self.pmf_length = logits.shape[-1]
+        self.logits = logits
+
+    def prob(self, indexes):
+        pmf = F.softmax(self.logits, dim=-1)
+        prob = pmf.gather(indexes, dim=-1)
+        if indexes.requires_grad:
+            return lower_bound(prob, 1e-9)
+        else:
+            return prob
+
+    def log_prob(self, indexes):
+        log_pmf = F.log_softmax(self.logits, dim=-1)
+        log_prob = log_pmf.gather(indexes, dim=-1)
+        if indexes.requires_grad:
+            return lower_bound(log_prob, math.log(1e-9))
+        else:
+            return log_prob
+
+    def pmf(self):
+        pmf = F.softmax(self.logits, dim=-1)
+
+        if pmf.requires_grad:
+            return lower_bound(pmf, 1e-9)
+        else:
+            return pmf
+
+    def log_pmf(self):
+        log_pmf = F.log_softmax(self.logits, dim=-1)
+
+        if log_pmf.requires_grad:
+            return lower_bound(log_pmf, math.log(1e-9))
+        else:
+            return log_pmf
 
 
 def pmf_to_quantized_cdf(pmf, precision: int = 16):
@@ -38,12 +83,7 @@ class DiscreteEntropyModelBase(nn.Module, metaclass=abc.ABCMeta):
         except (AttributeError, RuntimeError, TypeError):
             self._encoder = None
             self._decoder = None
-        # shape = self.prior.batch_shape
-        # # print(shape)
         self.register_buffer("_cdf_shape", torch.IntTensor(2).zero_())
-        # self.register_buffer("_cdf", torch.IntTensor(*shape))
-        # self.register_buffer("_cdf_offset", torch.IntTensor(*shape))
-        # self.register_buffer("_cdf_length", torch.IntTensor(*shape))
 
     @property
     def prior(self):
@@ -75,9 +115,6 @@ class DiscreteEntropyModelBase(nn.Module, metaclass=abc.ABCMeta):
         return self._decoder.decode_with_indexes(*args, **kwargs)
 
     def compress(self, indexes, cdf_indexes):
-        # cdf = self.cdf.tolist()
-        # cdf_length = self.cdf_length.reshape(-1).int().tolist()
-        # cdf_offset = self.cdf_offset.reshape(-1).int().tolist()
         string = self.encode_with_indexes(
             indexes.flatten().int().tolist(),
             cdf_indexes.flatten().int().tolist(),
@@ -89,13 +126,10 @@ class DiscreteEntropyModelBase(nn.Module, metaclass=abc.ABCMeta):
         return string
 
     def decompress(self, string, cdf_indexes):
-        # bincount = torch.bincount(cdf_indexes.flatten().int())
-        # print(bincount / bincount.sum())
         device = cdf_indexes.device
         shape = cdf_indexes.shape
         cdf_indexes = cdf_indexes.flatten().int().tolist()
-        # torch.cuda.synchronize()
-        # t0 = time.time()
+
         values = self.decode_with_indexes(
             string,
             cdf_indexes,
@@ -103,14 +137,9 @@ class DiscreteEntropyModelBase(nn.Module, metaclass=abc.ABCMeta):
             self.cdf_length,
             self.cdf_offset,
         )
-        # torch.cuda.synchronize()
-        # t1 = time.time()
 
         values = torch.tensor(values, device=device, dtype=torch.int64).reshape(shape)
 
-        # torch.cuda.synchronize()
-        # t2 = time.time()
-        # print(t1 - t0, t2 - t1)
         return values
 
     def get_ready_for_compression(self):
@@ -131,7 +160,7 @@ class DiscreteEntropyModelBase(nn.Module, metaclass=abc.ABCMeta):
         self._cdf_offset.data = cdf_offset.int()
         self._cdf_length.data = cdf_length.int()
 
-    def _init_tables(self):  # TODO: check cdf device
+    def _init_tables(self):
         shape = self._cdf_shape.tolist()
         device = self._cdf_shape.device
         self.register_buffer("_cdf", torch.IntTensor(*shape).to(device))
@@ -140,19 +169,21 @@ class DiscreteEntropyModelBase(nn.Module, metaclass=abc.ABCMeta):
 
     def _build_tables(self, prior, precision):
         """Computes integer-valued probability tables used by the range coder.
+
         These tables must not be re-generated independently on the sending and
         receiving side, since small numerical discrepancies between both sides can
         occur in this process. If the tables differ slightly, this in turn would
         very likely cause catastrophic error propagation during range decoding.
+
         Args:
           prior: distribution
+
         Returns:
           CDF table, CDF offsets, CDF lengths.
         """
         pmf = prior.pmf()
         num_pmfs, pmf_length = pmf.shape
 
-        # num_pmfs = 256
         pmf_length = pmf_length * torch.ones(num_pmfs).int()
         cdf_length = pmf_length + 2
         cdf_offset = torch.zeros(num_pmfs)
@@ -167,7 +198,7 @@ class DiscreteEntropyModelBase(nn.Module, metaclass=abc.ABCMeta):
             p = torch.cat([p, overflow], dim=0)
             c = pmf_to_quantized_cdf(p, precision)
             cdf[i, : c.shape[0]] = c
-        # print(cdf)
+
         return cdf, cdf_offset, cdf_length
 
 
@@ -199,12 +230,9 @@ class DiscreteEntropyModel(DiscreteEntropyModelBase):
         return indexes.repeat(B, 1, *shape[2:])
 
     def compress(self, indexes):
-        # indexes.shape torch.Size([420864, 1])=137*2*1536
         cdf_indexes = self._build_cdf_indexes(indexes.shape)
-        # cdf_indexes.shape torch.Size([420864, 1])
         return super().compress(indexes, cdf_indexes)
 
     def decompress(self, string, shape):
-        # shape = shape + (1,)
         cdf_indexes = self._build_cdf_indexes(shape)
         return super().decompress(string, cdf_indexes)
