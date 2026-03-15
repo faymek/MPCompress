@@ -50,9 +50,10 @@ class ResolutionTransform:
     resolution. Two modes are supported:
 
     - ``mode="resize"``:
-      - ``adapt(x)``: resize input tensor ``x`` to a fixed square size
-        ``(size, size)`` using bilinear interpolation, and record the original
-        spatial resolution.
+      - ``adapt(x)``: resize input tensor ``x``:
+        - If ``size`` is int: resize short edge to ``size`` (maintain aspect ratio).
+        - If ``size`` is [H, W]: resize to fixed size ``(H, W)``.
+        Record the original spatial resolution.
       - ``revert(x, size=None)``: resize tensor ``x`` to the given
         spatial size ``(H, W)``. If ``size`` is ``None``, the original spatial
         resolution recorded in ``adapt`` is used.
@@ -72,25 +73,69 @@ class ResolutionTransform:
     object.
     """
 
-    def __init__(self, mode: str = "resize", size: int = 518):
+    def __init__(self, mode: str = "resize", size=518):
+        """
+        Args:
+            mode: "resize" or "center_pad"
+            size: int or list/tuple of [H, W].
+                  If int: resize short edge to this size (maintain aspect ratio).
+                  If list/tuple: resize to fixed size (H, W).
+        """
         assert mode in ["resize", "center_pad"], f"Unsupported mode: {mode}"
         self.mode = mode
-        self.size = size
+
+        # Handle size param: support int or list/tuple (including OmegaConf ListConfig)
+        # Convert ListConfig or other sequence types to tuple
+        if (
+            isinstance(size, (list, tuple))
+            or hasattr(size, "__iter__")
+            and not isinstance(size, (str, int))
+        ):
+            try:
+                size_list = list(size)  # Convert to list (compatible with ListConfig)
+                assert len(size_list) == 2, f"size must be int or [H, W], got {size}"
+                self.size = tuple(size_list)  # (H, W)
+            except (TypeError, ValueError):
+                # If conversion fails, treat as int
+                self.size = int(size)
+        else:
+            # Int: used as short edge size
+            self.size = int(size)
+
         self._orig_size = None
         self._padding = None
 
     def adapt(self, x: torch.Tensor) -> torch.Tensor:
         if self.mode == "resize":
-            # 记录原始尺寸，以便在 revert 中恢复
+            # Store original size for revert
             self._orig_size = x.shape[-2:]
+
+            # Handle size: if int, resize short edge; if tuple, resize to fixed size
+            if isinstance(self.size, int):
+                # Short edge resize: preserve aspect ratio
+                _, _, h, w = x.shape
+                short_edge = min(h, w)
+                scale = self.size / short_edge
+                target_h = int(h * scale)
+                target_w = int(w * scale)
+                target_size = (target_h, target_w)
+            else:
+                # Resize to fixed size
+                # Ensure convert to tuple (compatible with OmegaConf ListConfig)
+                if isinstance(self.size, (list, tuple)):
+                    target_size = tuple(self.size)
+                else:
+                    # Handle other iterable types (e.g. ListConfig)
+                    target_size = tuple(int(v) for v in self.size)
+
             return F.interpolate(
                 x,
-                size=(self.size, self.size),
+                size=target_size,
                 mode="bilinear",
                 align_corners=False,
             )
         elif self.mode == "center_pad":
-            # 记录 padding 信息，以便在 revert 中恢复
+            # Store padding info for revert
             x_padded, padding = center_pad(x, self.size)
             self._padding = padding
             return x_padded
