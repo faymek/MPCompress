@@ -1,0 +1,311 @@
+# 统一的评估配置文件
+# 测试时指定使用哪个dataset和哪些head
+PROJECT_ROOT: ${oc.env:PROJECT_ROOT}
+
+# 数据集配置
+datasets:
+  # ImageNet分类数据集
+  imagenet_sel100:
+    type: ClassificationDataset
+    root: ${PROJECT_ROOT}/data/ImageNet_val_sel100
+    split: img
+    labels_file: imagenet_val_labels.txt  # 可选
+    file_list: labels.txt  # 可选
+  
+  imagenet_sel2k:
+    type: ClassificationDataset
+    root: ${PROJECT_ROOT}/data/ImageNet_val_sel2k
+    split: img
+    labels_file: imagenet_val_labels.txt  # 可选
+    file_list:
+    
+  # VOC2012分割数据集
+  voc2012_sel20:
+    type: SegmentationDataset
+    root: ${PROJECT_ROOT}/data/VOC2012
+    img_path: JPEGImages
+    seg_map_path: SegmentationClass
+    file_list: VOC2012_sel20.txt  # 可选
+
+  voc2012_val:
+    type: SegmentationDataset
+    root: ${PROJECT_ROOT}/data/VOC2012
+    img_path: JPEGImages
+    seg_map_path: SegmentationClass
+    file_list: VOC2012_val.txt
+
+  # ADE20K分割数据集
+  ade20k_val:
+    type: SegmentationDataset
+    root:  ${PROJECT_ROOT}/data/ADEChallengeData2016
+    img_path: images/validation
+    seg_map_path: annotations/validation
+    file_list:
+    reduce_zero_label: true
+
+# 头部模型配置
+heads:
+  imagenet_cls_small_last1:
+    type: Dinov2ClassifierHead
+    embed_dim: 384
+    layers: 1
+    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/dinov2_cls_head/dinov2_vits14_linear_head.pth
+
+  imagenet_cls_base_last1:
+    type: Dinov2ClassifierHead
+    embed_dim: 768
+    layers: 1
+    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/dinov2_cls_head/dinov2_vitb14_linear_head.pth
+
+  imagenet_cls_large_last1:
+    type: Dinov2ClassifierHead
+    embed_dim: 1024
+    layers: 1
+    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/dinov2_cls_head/dinov2_vitl14_linear_head.pth
+
+  imagenet_cls_giant_last1:
+    type: Dinov2ClassifierHead
+    embed_dim: 1536
+    layers: 1
+    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/dinov2_cls_head/dinov2_vitg14_linear_head.pth
+  
+  # 分类头部，最后四层
+  imagenet_cls_small_last4:
+    type: Dinov2ClassifierHead
+    embed_dim: 384
+    layers: 4
+    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/dinov2_cls_head/dinov2_vits14_linear4_head.pth
+
+  imagenet_cls_base_last4:
+    type: Dinov2ClassifierHead
+    embed_dim: 768
+    layers: 4
+    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/dinov2_cls_head/dinov2_vitb14_linear4_head.pth
+
+  imagenet_cls_large_last4:
+    type: Dinov2ClassifierHead
+    embed_dim: 1024
+    layers: 4
+    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/dinov2_cls_head/dinov2_vitl14_linear4_head.pth
+  
+  imagenet_cls_giant_last4:
+    type: Dinov2ClassifierHead
+    embed_dim: 1536
+    layers: 4
+    checkpoint_path: ${PROJECT_ROOT}/weights/dinov2/dinov2_cls_head/dinov2_vitg14_linear4_head.pth
+    
+  voc2012_seg_small_last1:
+    type: Dinov2SegmentationHead
+    in_channels: [384]
+    in_index: [0]
+    input_transform: resize_concat
+    channels: 384
+    num_classes: 21
+    patch_size: 16
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vits14_voc2012_linear_head.pth
+  
+  voc2012_seg_base_last1:
+    type: Dinov2SegmentationHead
+    in_channels: [768]
+    in_index: [0]
+    input_transform: resize_concat
+    channels: 768
+    num_classes: 21
+    patch_size: 16
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitb14_voc2012_linear_head.pth
+
+  voc2012_seg_large_last1:
+    type: Dinov2SegmentationHead
+    in_channels: [1024]
+    in_index: [0]
+    input_transform: resize_concat
+    channels: 1024
+    num_classes: 21
+    patch_size: 16
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitl14_voc2012_linear_head.pth
+
+  voc2012_seg_giant_last1:
+    type: Dinov2SegmentationHead
+    in_channels: [1536]
+    in_index: [0]
+    input_transform: resize_concat
+    channels: 1536
+    num_classes: 21
+    patch_size: 16
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitg14_voc2012_linear_head.pth
+
+  voc2012_seg_small_last4:
+    type: Dinov2SegmentationHead
+    in_channels: [384, 384, 384, 384]
+    in_index: [0, 1, 2, 3]
+    input_transform: resize_concat
+    channels: 1536
+    num_classes: 21
+    patch_size: 16
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vits14_voc2012_ms_head.pth
+
+  voc2012_seg_base_last4:
+    type: Dinov2SegmentationHead
+    in_channels: [768, 768, 768, 768]
+    in_index: [0, 1, 2, 3]
+    input_transform: resize_concat
+    channels: 3072
+    num_classes: 21
+    patch_size: 16
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitb14_voc2012_ms_head.pth
+
+  voc2012_seg_large_last4:
+    type: Dinov2SegmentationHead
+    in_channels: [1024, 1024, 1024, 1024]
+    in_index: [0, 1, 2, 3]
+    input_transform: resize_concat
+    channels: 4096
+    num_classes: 21
+    patch_size: 16
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitl14_voc2012_ms_head.pth
+
+  voc2012_seg_giant_last4:
+    type: Dinov2SegmentationHead
+    in_channels: [1536, 1536, 1536, 1536]
+    in_index: [0, 1, 2, 3]
+    input_transform: resize_concat
+    channels: 6144
+    num_classes: 21
+    patch_size: 16
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitg14_voc2012_ms_head.pth
+
+  # ADE20K分割头部
+  ade20k_seg_small_last4:
+    type: Dinov2SegmentationHead
+    in_channels: [384, 384, 384, 384]
+    in_index: [0, 1, 2, 3]
+    input_transform: resize_concat
+    channels: 1536
+    num_classes: 150
+    patch_size: 16
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vits14_ade20k_ms_head.pth
+
+  ade20k_seg_small_last1:
+    type: Dinov2SegmentationHead
+    in_channels: [384]
+    in_index: [0]
+    input_transform: resize_concat
+    channels: 384
+    num_classes: 150
+    patch_size: 16
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vits14_ade20k_linear_head.pth
+
+  ade20k_seg_base_last1:
+    type: Dinov2SegmentationHead
+    in_channels: [768]
+    in_index: [0]
+    input_transform: resize_concat
+    channels: 768
+    num_classes: 150
+    patch_size: 16
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitb14_ade20k_linear_head.pth
+
+  ade20k_seg_large_last1:
+    type: Dinov2SegmentationHead
+    in_channels: [1024]
+    in_index: [0]
+    input_transform: resize_concat
+    channels: 1024
+    num_classes: 150
+    patch_size: 16
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitl14_ade20k_linear_head.pth
+
+  ade20k_seg_giant_last1:
+    type: Dinov2SegmentationHead
+    in_channels: [1536]
+    in_index: [0]
+    input_transform: resize_concat
+    channels: 1536
+    num_classes: 150
+    patch_size: 16
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitg14_ade20k_linear_head.pth
+
+  ade20k_seg_base_last4:
+    type: Dinov2SegmentationHead
+    in_channels: [768, 768, 768, 768]
+    in_index: [0, 1, 2, 3]
+    input_transform: resize_concat
+    channels: 3072
+    num_classes: 150
+    patch_size: 16
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitb14_ade20k_ms_head.pth
+
+  ade20k_seg_large_last4:
+    type: Dinov2SegmentationHead
+    in_channels: [1024, 1024, 1024, 1024]
+    in_index: [0, 1, 2, 3]
+    input_transform: resize_concat
+    channels: 4096
+    num_classes: 150
+    patch_size: 16
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitl14_ade20k_ms_head.pth
+  
+  ade20k_seg_giant_last4:
+    type: Dinov2SegmentationHead
+    in_channels: [1536, 1536, 1536, 1536]
+    in_index: [0, 1, 2, 3]
+    input_transform: resize_concat
+    channels: 6144
+    num_classes: 150
+    patch_size: 16
+    checkpoint: ${PROJECT_ROOT}/weights/dinov2/dinov2_seg_head/dinov2_vitg14_ade20k_ms_head.pth
+
+
+# 评估指标配置
+metrics:
+  # 分类指标
+  cls_metrics:
+    type: TopKAccuracyMetric
+    topk: [1, 5]
+    
+  # VOC2012分割指标
+  voc2012_seg_metrics:
+    type: MeanIoUMetric
+    num_classes: 21
+    
+  # ADE20K分割指标
+  ade20k_seg_metrics:
+    type: MeanIoUMetric
+    num_classes: 150
+
+# 评估任务配置
+eval_presets:
+  # ImageNet分类任务
+  imagenet_sel100_cls:
+    dataset: imagenet_sel100
+    metric: cls_metrics
+    description: "ImageNet分类任务评估(100张图)"
+
+  imagenet_sel2k_cls:
+    dataset: imagenet_sel2k
+    metric: cls_metrics
+    description: "ImageNet分类任务评估(2000张图)"
+
+  voc2012_sel20_seg:
+    dataset: voc2012_sel20
+    metric: voc2012_seg_metrics
+    description: "VOC2012分割任务评估(20张图)"
+
+  voc2012_val_seg:
+    dataset: voc2012_val
+    metric: voc2012_seg_metrics
+    description: "VOC2012分割任务评估(验证集)"
+
+  ade20k_val_seg:
+    dataset: ade20k_val
+    metric: ade20k_seg_metrics
+    description: "ADE20K分割任务评估(验证集)"
+
+args:
+  # 全局评估参数
+  real: false  # 是否使用实际压缩
+  recon: 2     # 重建层 (0, 1, 2)
+  verbose: true
+  output_dir: ${PROJECT_ROOT}/eval_results
+  save_images: true  # 是否保存重建图像
+  save_predictions: true  # 是否保存预测结果 

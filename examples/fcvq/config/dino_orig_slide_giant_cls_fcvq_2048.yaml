@@ -1,0 +1,33 @@
+# Config for lamofc cls FCVQ - 2048 embeddings
+
+multi_run:
+  1.0:
+
+PROJECT_ROOT: ${oc.env:PROJECT_ROOT}
+
+resolution_transform:
+  type: ResolutionTransform
+  mode: resize
+  size: [224, 224]
+
+model:
+  type: Dinov2OrigClsFCVQ
+
+  dino_backbone:
+    model_size: giant
+    img_size: 224
+    patch_size: 14
+    dynamic_size: false
+    slot: null
+    n_last_blocks: 1
+    ckpt_path: ${PROJECT_ROOT}/weights/dinov2/backbone/dinov2_vitg14_pretrain.pth
+
+  fcvq_codec:
+    num_embeddings: 2048
+    embedding_dim: 32
+    num_chunks: 1
+    lmbda: 1.0
+    ckpt_path: ${PROJECT_ROOT}/weights/FCVQ/DINOv2/cls/epoch_100num_2048chunk_1.pth.tar
+
+allow_heads:
+  - imagenet_cls_giant_last1
