@@ -8,8 +8,7 @@ import time
 # from torch.cuda.amp import autocast
 # from sklearn.mixture import GaussianMixture
 
-from discrete_entropy.distribution.common import Softmax
-from discrete_entropy.entropy_model.discrete import DiscreteEntropyModel
+from mpcompress.entropy_models.fcvq_entropy import SoftmaxPrior, DiscreteEntropyModel
 import math
 
 
@@ -294,7 +293,7 @@ class FCVQ(BaseVAE):
         self.lmbda = lmbda
         self.num_chunks = num_chunks
         self.logits = nn.Parameter(torch.zeros(1, self.num_embeddings))
-        self.uncondi_entropy_model = DiscreteEntropyModel(prior=Softmax(self.logits))
+        self.uncondi_entropy_model = DiscreteEntropyModel(prior=SoftmaxPrior(self.logits))
         self.vq_modules = nn.ModuleList(
             [
                 VectorQuantizer(
