@@ -94,6 +94,13 @@ The Multi-Purpose Compression (MPC) framework is a coding architecture designed 
 
 For implementation details and usage examples, please refer to the directory `examples/mpc/` and its dedicated [README](examples/mpc/README.md).
 
+### Testing FCVQ (AITISA AI M2353)
+
+> "Transform-Free Feature Coding via Entropy-Constrained Vector Quantization" (AAAI 2026)
+
+FCVQ proposes a **transform-free** pipeline that directly encodes features via vector quantization and an entropy model, jointly learned for end-to-end optimization. The method achieves comparable performance compared to transform-based baselines (LaMoFC) while **significantly reducing encoding and decoding complexity**. Original Code: [FCVQ](https://github.com/xxii111/FCVQ). It is integrated into the LaMoFC pipeline to align the current framework.
+
+For implementation details and usage examples, please refer to the directory `examples/fcvq/` and its dedicated [README](examples/fcvq/README.md).
 
 ## Acknowledgement
 
