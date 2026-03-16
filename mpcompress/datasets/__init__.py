@@ -4,6 +4,15 @@ from .video import VideoFolder
 from .video_reader import PngSequenceVideoReader, YUV420VideoReader
 from .video_writer import PngSequenceVideoWriter, YUV420VideoWriter
 
+from .mlore import (
+    MLoREImageDataset,
+    PASCALContextDataset,
+    NYUDDataset,
+    get_mlore_transforms,
+    get_mlore_dataset,
+    collate_mlore,
+)
+
 __all__ = [
     "ImageFolder",
     "ClassificationDataset",
@@ -17,4 +26,11 @@ __all__ = [
     "YUV420VideoReader",
     "PngSequenceVideoWriter",
     "YUV420VideoWriter",
+    # MLoRE/RFC components
+    "MLoREImageDataset",
+    "PASCALContextDataset",
+    "NYUDDataset",
+    "get_mlore_transforms",
+    "get_mlore_dataset",
+    "collate_mlore",
 ]

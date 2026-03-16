@@ -3,6 +3,8 @@ from .lamofc import Dinov2TimmOnlyPatchCodec, Dinov2OrigSlideOnlyPatchCodec, Din
 from .bypass import Dinov2TimmBypass
 # from .fcvq import Dinov2FCVQCodec  # Skip to avoid mmcv dependency
 
+from .mlore import MLoREFrameCodec, MLoREVideoCodec, MLoREWrapperCodec
+
 __all__ = [
     "MPC_I1",
     "MPC_I2",
@@ -15,4 +17,8 @@ __all__ = [
     "Dinov2OrigClsBypass",
     "Dinov2OrigClsFCVQ",
     "Dinov2TimmBypass",
+    # MLoRE/RFC components
+    "MLoREFrameCodec",
+    "MLoREVideoCodec",
+    "MLoREWrapperCodec",
 ]

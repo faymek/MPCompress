@@ -1,0 +1,64 @@
+# RFC/MLoRE NYUD 评估配置
+# 用于评估 NYUD 数据集上的多任务压缩性能
+
+# ==================== 模型配置 ====================
+model:
+  type: MLoREFrameCodec
+  stage: stage1        # stage0(无压缩), stage1(压缩训练), stage2(Mona微调)
+  pretrained: true
+  img_size: [480, 640]  # NYUD 原始分辨率
+  drop_path_rate: 0.15
+  
+  # MLoRE backbone 参数
+  final_embed_dim: 640
+  rank_list: [64, 72, 80, 88, 96, 128, 128, 160, 192, 224, 256, 256, 256, 288, 320]
+  spe_rank: 64
+  topk: 9
+  pre_softmax: false
+
+# ==================== 任务配置 ====================
+# NYUD 支持的任务
+tasks:
+  NAMES: [semseg, edge, normals, depth, scene]
+  NUM_OUTPUT:
+    semseg: 40    # NYUD 40类语义分割
+    edge: 1
+    normals: 3
+    depth: 1
+    scene: 13     # NYUD 13类场景分类
+  # 深度估计参数
+  depth_max: 10.0
+  depth_min: 0.001
+
+# ==================== 数据集路径覆盖 ====================
+datasets:
+  nyud_val:
+    root: /path/to/NYUD_MT  # 请修改为实际路径
+
+# ==================== 检查点加载 ====================
+load:
+  path: ""  # 模型权重路径
+  strict: false
+  rules: []
+
+# ==================== 评估参数覆盖 ====================
+args:
+  real: true           # 使用实际熵编码
+  verbose: false
+  output_dir: ./eval_results/rfc_nyud
+  save_predictions: true
+  
+# ==================== 损失权重 ====================
+loss_weights:
+  semseg: 1.0
+  edge: 50.0
+  normals: 10.0
+  depth: 1.0
+  scene: 1.0
+  bpp_loss: 1.0
+  mse_loss: 100.0
+  load_balancing: 0.0001
+
+
+
+

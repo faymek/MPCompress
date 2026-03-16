@@ -1,0 +1,211 @@
+# RFC/MLoRE 评估基础配置
+# 统一评估配置，用于多任务特征压缩评估
+# 框架规范: https://faymek.github.io/MPCompress/framework/
+
+# ==================== 数据集配置 ====================
+datasets:
+  # PASCAL Context 数据集 - 支持5种任务
+  pascal_context_val:
+    type: PASCALContextDataset
+    root: /path/to/PASCALContext  # 请修改为实际路径
+    split: val
+    tasks: [semseg, edge, normals, sal, human_parts]
+    download: false
+  
+  pascal_context_train:
+    type: PASCALContextDataset
+    root: /path/to/PASCALContext
+    split: train
+    tasks: [semseg, edge, normals, sal, human_parts]
+    download: false
+
+  # NYUD 数据集 - 支持5种任务
+  nyud_val:
+    type: NYUDDataset
+    root: /path/to/NYUD_MT  # 请修改为实际路径
+    split: val
+    tasks: [semseg, edge, normals, depth, scene]
+    download: false
+  
+  nyud_train:
+    type: NYUDDataset
+    root: /path/to/NYUD_MT
+    split: train
+    tasks: [semseg, edge, normals, depth, scene]
+    download: false
+
+# ==================== 头部模型配置 ====================
+heads:
+  # PASCAL Context 任务头
+  pascal_semseg_head:
+    type: MLoREConvHead
+    in_channels: 640
+    num_classes: 21  # PASCAL Context 21类
+  
+  pascal_edge_head:
+    type: MLoREConvHead
+    in_channels: 640
+    num_classes: 1
+  
+  pascal_normals_head:
+    type: MLoREConvHead
+    in_channels: 640
+    num_classes: 3
+  
+  pascal_sal_head:
+    type: MLoREConvHead
+    in_channels: 640
+    num_classes: 2
+  
+  pascal_human_parts_head:
+    type: MLoREConvHead
+    in_channels: 640
+    num_classes: 7  # 6部位 + 背景
+
+  # NYUD 任务头
+  nyud_semseg_head:
+    type: MLoREConvHead
+    in_channels: 640
+    num_classes: 40  # NYUD 40类
+  
+  nyud_depth_head:
+    type: MLoREConvHead
+    in_channels: 640
+    num_classes: 1
+  
+  nyud_scene_head:
+    type: MLoREMLPHead
+    in_channels: 640
+    num_classes: 13  # NYUD 场景分类
+
+# ==================== 评估指标配置 ====================
+metrics:
+  # 语义分割指标
+  semseg_metrics:
+    type: SemsegMeter
+    database: PASCALContext
+    ignore_idx: 255
+  
+  nyud_semseg_metrics:
+    type: SemsegMeter
+    database: NYUD
+    ignore_idx: 255
+  
+  # 边缘检测指标
+  edge_metrics:
+    type: EdgeMeter
+    pos_weight: 0.95
+    ignore_index: 255
+  
+  # 表面法向量指标
+  normals_metrics:
+    type: NormalsMeter
+    ignore_index: 255
+  
+  # 显著性检测指标
+  sal_metrics:
+    type: SaliencyMeter
+    ignore_index: 255
+    threshold_step: 0.05
+    beta_squared: 0.3
+  
+  # 人体部位分割指标
+  human_parts_metrics:
+    type: HumanPartsMeter
+    database: PASCALContext
+    ignore_idx: 255
+  
+  # 深度估计指标
+  depth_metrics:
+    type: DepthMeter
+    max_depth: 10.0
+    min_depth: 0.001
+  
+  # 场景分类指标
+  scene_metrics:
+    type: ClassificationMeter
+    database: NYUD
+
+# ==================== 评估任务配置 ====================
+eval_tasks:
+  # PASCAL Context 单任务评估
+  pascal_semseg:
+    dataset: pascal_context_val
+    tasks: [semseg]
+    metric: semseg_metrics
+    description: "PASCAL Context 语义分割评估"
+  
+  pascal_edge:
+    dataset: pascal_context_val
+    tasks: [edge]
+    metric: edge_metrics
+    description: "PASCAL Context 边缘检测评估"
+  
+  pascal_normals:
+    dataset: pascal_context_val
+    tasks: [normals]
+    metric: normals_metrics
+    description: "PASCAL Context 表面法向量估计评估"
+  
+  pascal_sal:
+    dataset: pascal_context_val
+    tasks: [sal]
+    metric: sal_metrics
+    description: "PASCAL Context 显著性检测评估"
+  
+  pascal_human_parts:
+    dataset: pascal_context_val
+    tasks: [human_parts]
+    metric: human_parts_metrics
+    description: "PASCAL Context 人体部位分割评估"
+  
+  # PASCAL Context 多任务评估
+  pascal_multitask:
+    dataset: pascal_context_val
+    tasks: [semseg, edge, normals, sal, human_parts]
+    metric: multitask_metrics
+    description: "PASCAL Context 多任务综合评估"
+  
+  # NYUD 单任务评估
+  nyud_semseg:
+    dataset: nyud_val
+    tasks: [semseg]
+    metric: nyud_semseg_metrics
+    description: "NYUD 语义分割评估"
+  
+  nyud_depth:
+    dataset: nyud_val
+    tasks: [depth]
+    metric: depth_metrics
+    description: "NYUD 深度估计评估"
+  
+  nyud_scene:
+    dataset: nyud_val
+    tasks: [scene]
+    metric: scene_metrics
+    description: "NYUD 场景分类评估"
+  
+  # NYUD 多任务评估
+  nyud_multitask:
+    dataset: nyud_val
+    tasks: [semseg, edge, normals, depth, scene]
+    metric: multitask_metrics
+    description: "NYUD 多任务综合评估"
+
+# ==================== 默认参数 ====================
+args:
+  # 评估参数
+  real: false        # 是否使用实际熵编码（true为写入码流，false为码率估计）
+  verbose: false     # 详细输出
+  output_dir: ./eval_results
+  save_predictions: false  # 是否保存预测结果
+  
+  # 图像处理参数
+  image_pad: 64      # 图像padding大小（需为patch_size的倍数）
+  
+  # 设备参数
+  device: cuda
+
+
+
+

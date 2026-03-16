@@ -2,7 +2,6 @@ import torch
 from compressai.models.base import CompressionModel
 from mpcompress.utils.coder import encode_uniform_to_bits, decode_uniform_from_bits
 
-
 class UniformTokenCodec(CompressionModel):
     """Uniform token codec for compression.
     
@@ -102,4 +101,3 @@ class UniformTokenCodec(CompressionModel):
         tokens = decode_uniform_from_bits(_strings, symbols_len, alphabet_size)
         tokens = tokens.reshape(_shape).long().cuda()
         return {"tokens": tokens}
-

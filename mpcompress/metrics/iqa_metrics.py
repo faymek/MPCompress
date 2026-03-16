@@ -5,22 +5,47 @@ to avoid instantiating all metrics at import time. Metrics are created on-demand
 and cached using a simple module-level dictionary for reuse.
 """
 
+import os
+from collections import defaultdict
+from typing import Dict, Callable, Union, Tuple
+
 import torch
 import torch.nn.functional as F
+import torchvision
 from torchvision.transforms import ToTensor, ToPILImage
 import pyiqa
 import clip
 from PIL import Image
-import os
-from typing import Dict, Callable, Union
+import lpips
+import numpy as np
+from tqdm import tqdm
 
+from mpcompress.metrics.utils import *
 
 # Global configuration
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 # Per-metric function cache: name -> metric callable
 # This cache stores instantiated metric functions to avoid repeated initialization
 _METRIC_FUNC_CACHE: Dict[str, Callable] = {}
+_lpips_ours_model = None  # lazy cache
+_det_model_cache: Dict[str, torch.nn.Module] = {}
 
+def _tag_metric(func: Callable, scope: str) -> Callable:
+    func._metric_scope = scope
+    return func
+
+def split_img_metrics(
+    metrics: Dict[str, Callable],
+) -> Tuple[Dict[str, Callable], Dict[str, Callable]]:
+    """Split metrics into per-frame and directory-level groups."""
+    frame_metrics: Dict[str, Callable] = {}
+    dir_metrics: Dict[str, Callable] = {}
+    for name, func in metrics.items():
+        if getattr(func, "_metric_scope", "frame") == "dir":
+            dir_metrics[name] = func
+        else:
+            frame_metrics[name] = func
+    return frame_metrics, dir_metrics
 
 def tensor2image(x: torch.Tensor) -> Image.Image:
     """Convert a PyTorch tensor to PIL Image.
@@ -34,7 +59,6 @@ def tensor2image(x: torch.Tensor) -> Image.Image:
         Image.Image: PIL Image object in RGB format.
     """
     return ToPILImage()(x.clamp_(0, 1).squeeze())
-
 
 def read_image(filepath: str) -> torch.Tensor:
     """Read an image from file and convert to PyTorch tensor.
@@ -52,7 +76,6 @@ def read_image(filepath: str) -> torch.Tensor:
     assert os.path.isfile(filepath), f"File not found: {filepath}"
     img = Image.open(filepath).convert("RGB")
     return ToTensor()(img).unsqueeze(0).to(DEVICE)
-
 
 def create_clip_sim_metric(name: str = "ViT-B/32") -> Callable:
     """Create CLIP image similarity metric function.
@@ -86,11 +109,9 @@ def create_clip_sim_metric(name: str = "ViT-B/32") -> Callable:
 
     return clip_sim
 
-
 # MS-SSIM related metrics
 # Global MS-SSIM metric instance for reuse
 ms_ssim_metric = pyiqa.create_metric("ms_ssim", device=DEVICE)
-
 
 def padded_ms_ssim(
     img1_obj: Union[str, torch.Tensor], img2_obj: Union[str, torch.Tensor]
@@ -254,36 +275,16 @@ def lpips_frames_metric(frame_dir: str, gt_dir: str) -> dict:
             if not os.path.exists(file2_path):
                 continue
 
-            try:
-                img1 = Image.open(file1_path).convert("RGB")
-                img2 = Image.open(file2_path).convert("RGB")
-                if img1.size != img2.size:
-                    continue
-
-                img1_tensor = (
-                    torch.tensor(np.array(img1))
-                    .to(DEVICE)
-                    .permute(2, 0, 1)
-                    .unsqueeze(0)
-                    .float()
-                    / 255.0
-                )
-                img2_tensor = (
-                    torch.tensor(np.array(img2))
-                    .to(DEVICE)
-                    .permute(2, 0, 1)
-                    .unsqueeze(0)
-                    .float()
-                    / 255.0
-                )
-
-                score = model(img1_tensor, img2_tensor)
-
-                prefix = filename.split("_")[0]
-                prefix_dict[prefix].append(score.item())
-                all_scores.append(score.item())
-            except Exception:
+            img1 = read_image(file1_path)
+            img2 = read_image(file2_path)
+            if img1.shape != img2.shape:
                 continue
+
+            score = model(img1, img2)
+
+            prefix = filename.split("_")[0]
+            prefix_dict[prefix].append(score.item())
+            all_scores.append(score.item())
 
     results: dict = {}
     for prefix, values in prefix_dict.items():
@@ -316,6 +317,7 @@ def create_img_metrics(metric_names: Union[str, list] = None) -> Dict[str, Calla
         - TOPIQ-FR: TopIQ Full Reference
         - TOPIQ-NR: TopIQ No Reference
         - MUSIQ: Multi-scale Image Quality Transformer
+        - LPIPS-Frames: Folder-level LPIPS aggregated by filename prefix
 
     Args:
         metric_names (Union[str, list], optional): Name(s) of metrics to create.
@@ -344,6 +346,21 @@ def create_img_metrics(metric_names: Union[str, list] = None) -> Dict[str, Calla
         "TOPIQ-FR": lambda: pyiqa.create_metric("topiq_fr", device=DEVICE),
         "TOPIQ-NR": lambda: pyiqa.create_metric("topiq_nr", device=DEVICE),
         "MUSIQ": lambda: pyiqa.create_metric("musiq", device=DEVICE),
+        "LPIPS-Ours": lambda: lpips_ours,
+        "Det-mAP@0.7": lambda: _tag_metric(
+            create_detection_map_metric(
+                target_classes=(1, 3), score_thr=0.5, iou_threshold=0.7
+            ),
+            "dir",
+        ),
+        "Det-Frames@0.7": lambda: _tag_metric(
+            create_detection_frame_metrics(
+                target_classes=(1, 3), score_thr=0.5, iou_threshold=0.7
+            ),
+            "dir",
+        ),
+        "PSNR-Frames": lambda: _tag_metric(psnr_frames_metric, "dir"),
+        "LPIPS-Frames": lambda: _tag_metric(lpips_frames_metric, "dir"),
     }
 
     if metric_names is None:
@@ -365,7 +382,6 @@ def create_img_metrics(metric_names: Union[str, list] = None) -> Dict[str, Calla
         return _METRIC_FUNC_CACHE[name]
 
     return {name: get_or_create_metric(name) for name in names}
-
 
 def create_dist_metrics(metric_names: Union[str, list] = None) -> Dict[str, Callable]:
     """Create distribution-distance metrics dictionary with per-metric lazy cache.
@@ -412,3 +428,245 @@ def create_dist_metrics(metric_names: Union[str, list] = None) -> Dict[str, Call
         return _METRIC_FUNC_CACHE[name]
 
     return {name: get_or_create_metric(name) for name in names}
+
+def create_detection_frame_metrics(
+    target_classes=(1, 3),
+    score_thr: float = 0.5,
+    iou_threshold: float = 0.7,
+) -> Callable:
+    """Return detection metrics over frames and classes.
+
+    The callable expects (frame_dir, gt_dir) where gt_dir contains .pt labels.
+    """
+
+    def detection_frame_metrics(frame_dir: str, gt_dir: str) -> dict:
+        device = DEVICE
+        model = _get_det_model(device)
+
+        class_ap_totals = {cid: 0.0 for cid in target_classes}
+        class_counts = {cid: 0 for cid in target_classes}
+        class_frame_aps = {cid: [] for cid in target_classes}
+
+        frame_map = []
+        frame_map_per_class = {cid: [] for cid in target_classes}
+
+        label_path = gt_dir
+        gt_list = sorted([f for f in os.listdir(label_path) if f.endswith(".pt")])
+        num_classes = 90
+
+        for gt_name in tqdm(gt_list, desc="Processing enhanced frames"):
+            frame_path = os.path.join(frame_dir, gt_name.replace(".pt", ".png"))
+            if not os.path.isfile(frame_path):
+                frame_map.append(0.0)
+                continue
+
+            frame_tensor = torchvision.io.read_image(frame_path).float() / 255.0
+            frame_tensor = frame_tensor.unsqueeze(0).to(device)
+
+            gt = torch.load(os.path.join(label_path, gt_name))
+            gt_boxes = gt["boxes"].numpy()
+            gt_labels = gt["labels"].numpy()
+
+            with torch.no_grad():
+                pred = model(frame_tensor)
+
+            boxes = pred[0]["boxes"].detach().cpu().numpy()
+            labels = pred[0]["labels"].detach().cpu().numpy()
+            scores = pred[0]["scores"].detach().cpu().numpy()
+
+            keep = (scores > score_thr) & np.isin(labels, list(target_classes))
+            pred_boxes = boxes[keep]
+            pred_labels = labels[keep]
+            pred_scores = scores[keep]
+
+            if len(pred_boxes) > 0 and len(gt_boxes) > 0:
+                pred_mask = np.isin(pred_labels, list(target_classes))
+                gt_mask = np.isin(gt_labels, list(target_classes))
+
+                if np.any(pred_mask) and np.any(gt_mask):
+                    mAP, ap_per_class = compute_map(
+                        pred_boxes[pred_mask],
+                        pred_labels[pred_mask],
+                        pred_scores[pred_mask],
+                        gt_boxes[gt_mask],
+                        gt_labels[gt_mask],
+                        num_classes,
+                        iou_threshold=iou_threshold,
+                    )
+                    frame_map.append(float(mAP))
+                    for cid in target_classes:
+                        if cid in ap_per_class:
+                            frame_map_per_class[cid].append(float(ap_per_class[cid]))
+                else:
+                    frame_map.append(0.0)
+                    for cid in target_classes:
+                        if np.any(gt_labels == cid):
+                            frame_map_per_class[cid].append(0.0)
+            else:
+                frame_map.append(0.0)
+                for cid in target_classes:
+                    if len(gt_boxes) > 0 and np.any(gt_labels == cid):
+                        frame_map_per_class[cid].append(0.0)
+
+            for cid in target_classes:
+                pred_mask = pred_labels == cid
+                gt_mask = gt_labels == cid
+
+                if np.any(pred_mask) and np.any(gt_mask):
+                    ap = compute_ap_for_class(
+                        pred_boxes[pred_mask],
+                        pred_scores[pred_mask],
+                        gt_boxes[gt_mask],
+                    )
+                    class_ap_totals[cid] += ap
+                    class_counts[cid] += 1
+                    class_frame_aps[cid].append(ap)
+                elif np.any(gt_mask):
+                    class_ap_totals[cid] += 0.0
+                    class_counts[cid] += 1
+                    class_frame_aps[cid].append(0.0)
+
+        results: dict = {}
+        if frame_map:
+            results["overall_mAP"] = float(np.mean(frame_map))
+            results["overall_mAP_std"] = float(np.std(frame_map))
+            results["overall_mAP_max"] = float(np.max(frame_map))
+            results["overall_mAP_min"] = float(np.min(frame_map))
+            results["overall_mAP_median"] = float(np.median(frame_map))
+        else:
+            results["overall_mAP"] = 0.0
+            results["overall_mAP_std"] = 0.0
+            results["overall_mAP_max"] = 0.0
+            results["overall_mAP_min"] = 0.0
+            results["overall_mAP_median"] = 0.0
+
+        for cid in target_classes:
+            if frame_map_per_class[cid]:
+                class_maps = frame_map_per_class[cid]
+                results[f"class_{cid}_mAP"] = float(np.mean(class_maps))
+                results[f"class_{cid}_mAP_std"] = float(np.std(class_maps))
+                results[f"class_{cid}_mAP_count"] = len(class_maps)
+            else:
+                results[f"class_{cid}_mAP"] = 0.0
+                results[f"class_{cid}_mAP_std"] = 0.0
+                results[f"class_{cid}_mAP_count"] = 0
+
+        total_samples = sum(class_counts.values())
+        results["weighted_AP_avg"] = (
+            float(sum(class_ap_totals.values()) / total_samples) if total_samples > 0 else 0.0
+        )
+        results["total_samples"] = total_samples
+
+        for cid in target_classes:
+            if class_counts[cid] > 0:
+                avg_ap = class_ap_totals[cid] / class_counts[cid]
+                class_aps = class_frame_aps[cid]
+                results[f"class_{cid}_AP_avg"] = float(avg_ap)
+                results[f"class_{cid}_AP_std"] = float(np.std(class_aps)) if len(class_aps) > 1 else 0.0
+                results[f"class_{cid}_AP_max"] = float(np.max(class_aps))
+                results[f"class_{cid}_AP_min"] = float(np.min(class_aps))
+                results[f"class_{cid}_AP_median"] = float(np.median(class_aps))
+                results[f"class_{cid}_AP_count"] = class_counts[cid]
+            else:
+                results[f"class_{cid}_AP_avg"] = 0.0
+                results[f"class_{cid}_AP_std"] = 0.0
+                results[f"class_{cid}_AP_max"] = 0.0
+                results[f"class_{cid}_AP_min"] = 0.0
+                results[f"class_{cid}_AP_median"] = 0.0
+                results[f"class_{cid}_AP_count"] = 0
+
+        return results
+
+    return detection_frame_metrics
+
+
+def _get_det_model(device: torch.device):
+    key = str(device)
+    if key not in _det_model_cache:
+        model = load_detection_model(key)  # 你的 load_detection_model 期望的是 'cuda:0'/'cpu'
+        model.eval()
+        _det_model_cache[key] = model
+    return _det_model_cache[key]
+
+
+def create_detection_map_metric(
+    target_classes=(1, 3),
+    score_thr: float = 0.5,
+    iou_threshold: float = 0.7,
+) -> Callable:
+    """
+    返回一个 pyiqa 风格的 metric callable，但这里输入不是两张图，而是两个目录：
+        metric(frame_dir, gt_dir) -> torch.Tensor([overall_mAP])
+
+    说明：
+    - frame_dir: 增强后帧（png）目录
+    - gt_dir:   GT 标签（pt）目录，文件名与帧名同 stem（xxx.pt <-> xxx.png）
+    """
+
+    def detection_map_metric(frame_dir: str, gt_dir: str) -> torch.Tensor:
+        device = DEVICE
+        model = _get_det_model(device)
+
+        frame_map = []
+        frame_map_per_class = {cid: [] for cid in target_classes}
+
+        label_path = gt_dir
+        gt_list = sorted([f for f in os.listdir(label_path) if f.endswith(".pt")])
+
+        # COCO 类别总数（你的原注释说 90，这里保持一致）
+        num_classes = 90
+
+        for gt_name in tqdm(gt_list, desc="Processing enhanced frames"):
+            frame_path = os.path.join(frame_dir, gt_name.replace(".pt", ".png"))
+            if not os.path.isfile(frame_path):
+                # 缺帧按 0 处理（也可 raise）
+                frame_map.append(0.0)
+                continue
+
+            frame_tensor = torchvision.io.read_image(frame_path).float() / 255.0
+            frame_tensor = frame_tensor.unsqueeze(0).to(device)
+
+            gt = torch.load(os.path.join(label_path, gt_name))
+            gt_boxes = gt["boxes"].numpy()
+            gt_labels = gt["labels"].numpy()
+
+            with torch.no_grad():
+                pred = model(frame_tensor)
+
+            boxes = pred[0]["boxes"].detach().cpu().numpy()
+            labels = pred[0]["labels"].detach().cpu().numpy()
+            scores = pred[0]["scores"].detach().cpu().numpy()
+
+            # 只保留关注类 & 置信度阈值
+            keep = (scores > score_thr) & np.isin(labels, list(target_classes))
+            pred_boxes = boxes[keep]
+            pred_labels = labels[keep]
+            pred_scores = scores[keep]
+
+            if len(pred_boxes) > 0 and len(gt_boxes) > 0:
+                pred_mask = np.isin(pred_labels, list(target_classes))
+                gt_mask = np.isin(gt_labels, list(target_classes))
+
+                if np.any(pred_mask) and np.any(gt_mask):
+                    mAP, ap_per_class = compute_map(
+                        pred_boxes[pred_mask],
+                        pred_labels[pred_mask],
+                        pred_scores[pred_mask],
+                        gt_boxes[gt_mask],
+                        gt_labels[gt_mask],
+                        num_classes,
+                        iou_threshold=iou_threshold,
+                    )
+                    frame_map.append(float(mAP))
+                    for cid in target_classes:
+                        if cid in ap_per_class:
+                            frame_map_per_class[cid].append(float(ap_per_class[cid]))
+                else:
+                    frame_map.append(0.0)
+            else:
+                frame_map.append(0.0)
+
+        overall = float(np.mean(frame_map)) if len(frame_map) > 0 else 0.0
+        return torch.tensor([overall], device=device, dtype=torch.float32)
+
+    return detection_map_metric

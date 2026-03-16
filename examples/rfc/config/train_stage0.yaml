@@ -1,0 +1,89 @@
+# RFC/MLoRE 训练配置 - Stage 0
+# 阶段0：无压缩多任务预训练
+# 训练通用的多任务backbone，不包含压缩模块
+
+# ==================== 基础设置 ====================
+version_name: stage0_nocompress
+out_dir: "./output_dir/rfc_stage0"
+checkpoint: null  # 从头训练
+load_multitask_encoder: false
+fix_bn: false
+stage: stage0
+
+# ==================== 数据库配置 ====================
+train_db_name: PASCALContext
+val_db_name: PASCALContext
+db_paths:
+  PASCALContext: /path/to/PASCALContext
+  NYUD_MT: /path/to/NYUD_MT
+
+# ==================== 数据加载 ====================
+trBatch: 4
+valBatch: 8
+nworkers: 4
+ignore_index: 255
+
+# ==================== 优化器和调度器 ====================
+optimizer: adam
+optimizer_kwargs:
+  lr: 0.0001
+  weight_decay: 0.000001
+scheduler: poly
+grad_clip_param:
+  max_norm: 10
+  norm_type: 2
+
+# ==================== 训练参数 ====================
+epochs: 999999
+max_iter: 100000
+val_interval: 2000
+intermediate_supervision: false
+
+# ==================== 模型配置 ====================
+model: MLoRE
+backbone: MLoRE_coding_baseline_nocompress_vitB
+head: conv
+final_embed_dim: 640
+rank_list: [16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128]
+spe_rank: 64
+topk: 9
+pre_softmax: false
+
+# ==================== 训练/测试尺度 ====================
+TRAIN:
+  SCALE: [512, 512]
+TEST:
+  SCALE: [512, 512]
+
+# ==================== 任务配置 ====================
+task_dictionary:
+  include_semseg: true
+  include_human_parts: true
+  include_sal: true
+  include_edge: true
+  include_normals: true
+  edge_w: 0.95
+
+# 任务定义
+TASKS:
+  NAMES: [semseg, human_parts, sal, edge, normals]
+  NUM_OUTPUT:
+    semseg: 21
+    human_parts: 7
+    sal: 2
+    edge: 1
+    normals: 3
+
+# ==================== 损失权重 ====================
+loss_kwargs:
+  loss_weights:
+    semseg: 1.0
+    human_parts: 2.0
+    sal: 5.0
+    edge: 50.0
+    normals: 10.0
+    load_balancing: 0.0001
+
+
+
+

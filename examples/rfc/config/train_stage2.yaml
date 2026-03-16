@@ -1,0 +1,90 @@
+# RFC/MLoRE 训练配置 - Stage 2
+# 阶段2：Mona Adapter 微调
+# 加载Stage1模型，微调最后一层FFN和Mona adapter
+
+# ==================== 基础设置 ====================
+version_name: stage2_mona_finetune
+out_dir: "./output_dir/rfc_stage2"
+checkpoint: /path/to/stage1/checkpoint.pth.tar  # Stage1模型路径
+load_multitask_encoder: false
+fix_bn: true   # 冻结BN层
+stage: stage2
+
+# ==================== 数据库配置 ====================
+train_db_name: PASCALContext
+val_db_name: PASCALContext
+db_paths:
+  PASCALContext: /path/to/PASCALContext
+  NYUD_MT: /path/to/NYUD_MT
+
+# ==================== 数据加载 ====================
+trBatch: 3
+valBatch: 6
+nworkers: 2
+ignore_index: 255
+
+# ==================== 优化器和调度器 ====================
+optimizer: adam
+optimizer_kwargs:
+  lr: 0.00001
+  weight_decay: 0.000001
+scheduler: poly
+grad_clip_param:
+  max_norm: 10
+  norm_type: 2
+
+# ==================== 训练参数 ====================
+epochs: 999999
+max_iter: 40000
+val_interval: 2000
+intermediate_supervision: false
+
+# ==================== 模型配置 ====================
+model: MLoRE_coding_baseline
+backbone: MLoRE_coding_input_vitB_feat_baseline_mona
+head: conv
+final_embed_dim: 640
+rank_list: [64, 72, 80, 88, 96, 128, 128, 160, 192, 224, 256, 256, 256, 288, 320]
+spe_rank: 64
+topk: 9
+pre_softmax: false
+
+# ==================== 训练/测试尺度 ====================
+TRAIN:
+  SCALE: [512, 512]
+TEST:
+  SCALE: [512, 512]
+
+# ==================== 任务配置 ====================
+# 每次只微调一个任务
+# TODO: 根据需要修改 include_xxx 来选择任务
+task_dictionary:
+  include_semseg: true
+  include_human_parts: false
+  include_sal: false
+  include_edge: false
+  include_normals: false
+  edge_w: 0.95
+
+# 所有任务定义
+TASKS:
+  NAMES: [semseg]  # 当前训练的任务
+  NUM_OUTPUT:
+    semseg: 21
+    human_parts: 7
+    sal: 2
+    edge: 1
+    normals: 3
+
+# ==================== 损失权重 ====================
+loss_kwargs:
+  loss_weights:
+    semseg: 1.0
+    human_parts: 2.0
+    sal: 5.0
+    edge: 50.0
+    normals: 10.0
+    load_balancing: 0.0001
+    bpp_loss: 1.0
+    mse_loss: 100.0
+
