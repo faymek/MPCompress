@@ -225,7 +225,7 @@ class NYUDDataset(MLoREImageDataset):
         super().__init__(root, split, tasks, transform, **kwargs)
         
         # Import original dataset class
-        from rfcdata.nyud import NYUD_MT
+        from mpcompress.datasets.rfcdata.nyud import NYUD_MT
         
         # Map tasks to dataset flags
         task_flags = {

@@ -1,20 +1,21 @@
 # RFC/MLoRE 评估基础配置
 # 统一评估配置，用于多任务特征压缩评估
 # 框架规范: https://faymek.github.io/MPCompress/framework/
+PROJECT_ROOT: ${oc.env:PROJECT_ROOT}
 
 # ==================== 数据集配置 ====================
 datasets:
   # PASCAL Context 数据集 - 支持5种任务
   pascal_context_val:
     type: PASCALContextDataset
-    root: /path/to/PASCALContext  # 请修改为实际路径
+    root: ${PROJECT_ROOT}/data/PASCALContext  # 请修改为实际路径
     split: val
     tasks: [semseg, edge, normals, sal, human_parts]
     download: false
   
   pascal_context_train:
     type: PASCALContextDataset
-    root: /path/to/PASCALContext
+    root: ${PROJECT_ROOT}/data/PASCALContext
     split: train
     tasks: [semseg, edge, normals, sal, human_parts]
     download: false
@@ -22,14 +23,14 @@ datasets:
   # NYUD 数据集 - 支持5种任务
   nyud_val:
     type: NYUDDataset
-    root: /path/to/NYUD_MT  # 请修改为实际路径
+    root: ${PROJECT_ROOT}/data/NYUD_MT  # 请修改为实际路径
     split: val
     tasks: [semseg, edge, normals, depth, scene]
     download: false
   
   nyud_train:
     type: NYUDDataset
-    root: /path/to/NYUD_MT
+    root: ${PROJECT_ROOT}/data/NYUD_MT
     split: train
     tasks: [semseg, edge, normals, depth, scene]
     download: false
@@ -197,7 +198,7 @@ args:
   # 评估参数
   real: false        # 是否使用实际熵编码（true为写入码流，false为码率估计）
   verbose: false     # 详细输出
-  output_dir: ./eval_results
+  output_dir: ${PROJECT_ROOT}/logs/rfc
   save_predictions: false  # 是否保存预测结果
   
   # 图像处理参数

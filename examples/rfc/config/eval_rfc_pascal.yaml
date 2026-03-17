@@ -1,5 +1,6 @@
 # RFC/MLoRE PASCAL Context 评估配置
 # 用于评估 PASCAL Context 数据集上的多任务压缩性能
+PROJECT_ROOT: ${oc.env:PROJECT_ROOT}
 
 # ==================== 模型配置 ====================
 model:
@@ -30,11 +31,11 @@ tasks:
 # ==================== 数据集路径覆盖 ====================
 datasets:
   pascal_context_val:
-    root: /home/sihang/MPCompress-merge-251229/PASCALContext  # 请修改为实际路径
+    root: ${PROJECT_ROOT}/data/PASCALContext  # 请修改为实际路径
 
 # ==================== 检查点加载 ====================
 load:
-  path: ""  # 模型权重路径（命令行--checkpoint覆盖）
+  path: ${PROJECT_ROOT}/weights/rfc/edge-ckpt.pth.tar  # 模型权重路径（命令行--checkpoint覆盖）
   strict: false
   rules:
     # 权重键名映射规则（如果需要）
@@ -45,7 +46,7 @@ load:
 args:
   real: true           # 使用实际熵编码
   verbose: false
-  output_dir: ./eval_results/rfc_pascal
+  output_dir: ${PROJECT_ROOT}/logs/rfc_pascal
   save_predictions: true
 
 # ==================== 损失权重（用于联合评估） ====================

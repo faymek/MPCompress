@@ -1,6 +1,6 @@
 # RFC/MLoRE NYUD 评估配置
 # 用于评估 NYUD 数据集上的多任务压缩性能
-
+PROJECT_ROOT: ${oc.env:PROJECT_ROOT}
 # ==================== 模型配置 ====================
 model:
   type: MLoREFrameCodec
@@ -33,7 +33,7 @@ tasks:
 # ==================== 数据集路径覆盖 ====================
 datasets:
   nyud_val:
-    root: /path/to/NYUD_MT  # 请修改为实际路径
+    root: ${PROJECT_ROOT}/data/NYUD_MT  # 请修改为实际路径
 
 # ==================== 检查点加载 ====================
 load:
@@ -45,7 +45,7 @@ load:
 args:
   real: true           # 使用实际熵编码
   verbose: false
-  output_dir: ./eval_results/rfc_nyud
+  output_dir: ${PROJECT_ROOT}/logs/rfc_nyud
   save_predictions: true
   
 # ==================== 损失权重 ====================

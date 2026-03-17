@@ -35,14 +35,9 @@ from PIL import Image
 from torch.utils.data import DataLoader
 from torchvision.transforms import ToTensor
 from tqdm import tqdm
+from dotenv import load_dotenv
 
-# Add project root to path
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
-# Add RFC directory to path
-RFC_ROOT = PROJECT_ROOT / "RFC"
-sys.path.insert(0, str(RFC_ROOT))
+load_dotenv()
 
 from mpcompress.models import MLoREFrameCodec, MLoREVideoCodec
 from mpcompress.datasets import PASCALContextDataset, NYUDDataset, get_mlore_transforms, collate_mlore
