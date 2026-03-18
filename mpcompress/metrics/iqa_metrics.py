@@ -154,6 +154,145 @@ def padded_ms_ssim_db(
     """
     return -10 * torch.log10(1 - padded_ms_ssim(img1_obj, img2_obj))
 
+def _get_lpips_ours_model(device):
+    global _lpips_ours_model
+    if _lpips_ours_model is None:
+        _lpips_ours_model = lpips.LPIPS(net="alex").to(device)
+        _lpips_ours_model.eval()
+    return _lpips_ours_model
+
+
+def _load_image(obj, device):
+    if isinstance(obj, str):
+        img = Image.open(obj).convert("RGB")
+        return ToTensor()(img).unsqueeze(0).to(device)
+    else:
+        return obj.to(device)
+
+
+def lpips_ours(img1_obj, img2_obj, device=DEVICE):
+    """
+    LPIPS-Ours metric (pyiqa-compatible)
+
+    Args:
+        img1_obj: Tensor [1,3,H,W] in [0,1] or image path
+        img2_obj: Tensor [1,3,H,W] in [0,1] or image path
+
+    Returns:
+        torch.Tensor with shape [1], LPIPS distance (lower is better)
+    """
+
+    img1 = _load_image(img1_obj, device)
+    img2 = _load_image(img2_obj, device)
+
+    assert img1.shape == img2.shape, \
+        f"Image size mismatch: {img1.shape} vs {img2.shape}"
+
+    model = _get_lpips_ours_model(device)
+
+    with torch.no_grad():
+        score = model(img1, img2)
+
+    return score  # torch.Tensor [1]
+
+
+def psnr_frames_metric(frame_dir: str, gt_dir: str) -> dict:
+    """Compute per-prefix and global PSNR over image folders.
+
+    Assumes paired filenames in frame_dir and gt_dir.
+    """
+    prefix_dict = defaultdict(list)
+    all_scores = []
+
+    for filename in sorted(os.listdir(frame_dir)):
+        if not filename.lower().endswith((".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")):
+            continue
+        file1_path = os.path.join(frame_dir, filename)
+        file2_path = os.path.join(gt_dir, filename)
+
+        if not os.path.exists(file2_path):
+            continue
+
+        img1 = read_image(file1_path)
+        img2 = read_image(file2_path)
+        if img1.shape != img2.shape:
+            continue
+
+        mse = torch.mean((img1 - img2) ** 2)
+        mse = torch.clamp(mse, min=1e-10)
+        psnr = -10.0 * torch.log10(mse)
+
+        prefix = filename.split("_")[0]
+        prefix_dict[prefix].append(psnr.item())
+        all_scores.append(psnr.item())
+
+    results: dict = {}
+    for prefix, values in prefix_dict.items():
+        results[f"prefix_{prefix}"] = float(np.mean(values))
+
+    results["global_avg"] = float(np.mean(all_scores)) if all_scores else 0.0
+    results["count"] = len(all_scores)
+    return results
+
+
+def lpips_frames_metric(frame_dir: str, gt_dir: str) -> dict:
+    """Compute per-prefix and global LPIPS distance over image folders.
+
+    This mirrors the behavior in `main_test_metric_2.py`:
+      - Pair images by filename between `frame_dir` and `gt_dir`
+      - Compute LPIPS (alex backbone) per image pair
+      - Aggregate by filename prefix (substring before the first "_")
+    """
+    prefix_dict = defaultdict(list)
+    all_scores = []
+
+    model = _get_lpips_ours_model(DEVICE)
+    with torch.no_grad():
+        for filename in os.listdir(frame_dir):
+            file1_path = os.path.join(frame_dir, filename)
+            file2_path = os.path.join(gt_dir, filename)
+            if not os.path.exists(file2_path):
+                continue
+
+            try:
+                img1 = Image.open(file1_path).convert("RGB")
+                img2 = Image.open(file2_path).convert("RGB")
+                if img1.size != img2.size:
+                    continue
+
+                img1_tensor = (
+                    torch.tensor(np.array(img1))
+                    .to(DEVICE)
+                    .permute(2, 0, 1)
+                    .unsqueeze(0)
+                    .float()
+                    / 255.0
+                )
+                img2_tensor = (
+                    torch.tensor(np.array(img2))
+                    .to(DEVICE)
+                    .permute(2, 0, 1)
+                    .unsqueeze(0)
+                    .float()
+                    / 255.0
+                )
+
+                score = model(img1_tensor, img2_tensor)
+
+                prefix = filename.split("_")[0]
+                prefix_dict[prefix].append(score.item())
+                all_scores.append(score.item())
+            except Exception:
+                continue
+
+    results: dict = {}
+    for prefix, values in prefix_dict.items():
+        results[f"prefix_{prefix}"] = float(np.mean(values))
+
+    results["global_avg"] = float(np.mean(all_scores)) if all_scores else 0.0
+    results["count"] = len(all_scores)
+    return results
+
 
 def create_img_metrics(metric_names: Union[str, list] = None) -> Dict[str, Callable]:
     """Create image quality assessment (IQA) metrics dictionary.
