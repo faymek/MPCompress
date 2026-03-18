@@ -29,12 +29,72 @@ datasets:
   # UVG视频数据集
   uvg_val:
     type: MP4VideoFolder
-    #root: /mnt/netdisk2/sunsf/Code/UnifiedFramework-ICASSP/data/uvg/video/test
-    root: /mnt/netdisk2/backup/standards/MPCompress-dev/data/
+    root: /mnt/netdisk2/sunsf/Code/UnifiedFramework-ICASSP/data/uvg/video/test
+    # root: /mnt/netdisk2/backup/standards/MPCompress-dev/data/
     split: ""
     src_type: mp4
     sequences:
       Beauty.mp4:
+        src_width: 1920
+        src_height: 1080
+        frame_num: 120
+      Bosphorus.mp4:
+        src_width: 1920
+        src_height: 1080
+        frame_num: 120
+      CityAlley.mp4:
+        src_width: 1920
+        src_height: 1080
+        frame_num: 120
+      FlowerFocus.mp4:
+        src_width: 1920
+        src_height: 1080
+        frame_num: 120
+      FlowerKids.mp4:
+        src_width: 1920
+        src_height: 1080
+        frame_num: 120
+      FlowerPan.mp4:
+        src_width: 1920
+        src_height: 1080
+        frame_num: 120
+      HoneyBee.mp4:
+        src_width: 1920
+        src_height: 1080
+        frame_num: 120
+      Jockey.mp4:
+        src_width: 1920
+        src_height: 1080
+        frame_num: 120
+      Lips.mp4:
+        src_width: 1920
+        src_height: 1080
+        frame_num: 120
+      RaceNight.mp4:
+        src_width: 1920
+        src_height: 1080
+        frame_num: 120
+      ReadySteadyGo.mp4:
+        src_width: 1920
+        src_height: 1080
+        frame_num: 120
+      RiverBank.mp4:
+        src_width: 1920
+        src_height: 1080
+        frame_num: 120
+      ShakeNDry.mp4:
+        src_width: 1920
+        src_height: 1080
+        frame_num: 60
+      SunBath.mp4:
+        src_width: 1920
+        src_height: 1080
+        frame_num: 60
+      Twilight.mp4:
+        src_width: 1920
+        src_height: 1080
+        frame_num: 120
+      YachtRide.mp4:
         src_width: 1920
         src_height: 1080
         frame_num: 120
