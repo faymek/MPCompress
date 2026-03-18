@@ -269,27 +269,42 @@ def lpips_frames_metric(frame_dir: str, gt_dir: str) -> dict:
 
     model = _get_lpips_ours_model(DEVICE)
     with torch.no_grad():
-        for filename in sorted(os.listdir(frame_dir)):
-            if not filename.lower().endswith(
-                (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
-            ):
-                continue
-
+        for filename in os.listdir(frame_dir):
             file1_path = os.path.join(frame_dir, filename)
             file2_path = os.path.join(gt_dir, filename)
             if not os.path.exists(file2_path):
                 continue
 
-            img1 = read_image(file1_path)
-            img2 = read_image(file2_path)
-            if img1.shape != img2.shape:
+            try:
+                img1 = Image.open(file1_path).convert("RGB")
+                img2 = Image.open(file2_path).convert("RGB")
+                if img1.size != img2.size:
+                    continue
+
+                img1_tensor = (
+                    torch.tensor(np.array(img1))
+                    .to(DEVICE)
+                    .permute(2, 0, 1)
+                    .unsqueeze(0)
+                    .float()
+                    / 255.0
+                )
+                img2_tensor = (
+                    torch.tensor(np.array(img2))
+                    .to(DEVICE)
+                    .permute(2, 0, 1)
+                    .unsqueeze(0)
+                    .float()
+                    / 255.0
+                )
+
+                score = model(img1_tensor, img2_tensor)
+
+                prefix = filename.split("_")[0]
+                prefix_dict[prefix].append(score.item())
+                all_scores.append(score.item())
+            except Exception:
                 continue
-
-            score = model(img1, img2)
-
-            prefix = filename.split("_")[0]
-            prefix_dict[prefix].append(score.item())
-            all_scores.append(score.item())
 
     results: dict = {}
     for prefix, values in prefix_dict.items():
