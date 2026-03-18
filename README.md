@@ -108,6 +108,12 @@ CAVC is a video-feature joint coding framework proposed by AI M2328. It regulate
 
 For implementation details and usage examples, please refer to the directory `examples/cavc/` and its dedicated [README](examples/cavc/README.md).
 
+### Testing RFC (AITISA AI M2268)
+
+RFC [3] studies a feature disentanglement and compression approach for multi-task ViT models. To extract task-relevant knowledge, it introduces rate constraints and task-specific losses to encourage the network to discard irrelevant information while preserving task-related information. To improve flexibility, it adopts a simple strategy: fine-tune a task-specific client-side network for each task, while different tasks share the same cloud-side network. This design can be conveniently deployed and adjusted by distributing different client-side model parameters.
+
+For implementation details and usage examples, please refer to the directory `examples/rfc/` and its dedicated [README](examples/rfc/README.md).
+
 ## Acknowledgement
 
 Special thanks to Donghui Feng, Bo Gao, Qingyue Ling, Fengxi Zhang and Zekai Liu, for their valuable contributions in building this test platform.
