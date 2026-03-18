@@ -102,6 +102,12 @@ FCVQ proposes a **transform-free** pipeline that directly encodes features via v
 
 For implementation details and usage examples, please refer to the directory `examples/fcvq/` and its dedicated [README](examples/fcvq/README.md).
 
+### Testing CAVC (AITISA AI M2328)
+
+CAVC is a video-feature joint coding framework proposed by AI M2328. It regulates video pixel distributions through context prompts and visual feature guidance, enabling targeted adaptation to different coding scenarios, such as human perceptual optimization, objective fidelity optimization, and machine vision tasks including object detection. During training, it adopts an advanced end-to-end compression proxy network to ensure effective gradient backpropagation; during inference, the compressor can be replaced with any end-to-end network or standard coding tool, providing strong compatibility.
+
+For implementation details and usage examples, please refer to the directory `examples/cavc/` and its dedicated [README](examples/cavc/README.md).
+
 ## Acknowledgement
 
 Special thanks to Donghui Feng, Bo Gao, Qingyue Ling, Fengxi Zhang and Zekai Liu, for their valuable contributions in building this test platform.
