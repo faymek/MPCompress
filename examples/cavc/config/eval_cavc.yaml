@@ -6,19 +6,13 @@
 #     codec_args:
 #       mode: 2
 
+PROJECT_ROOT: ${oc.env:PROJECT_ROOT}
+
 load:
-  path: /mnt/netdisk2/sunsf/Code/MPCompress-merge/ckpt/cavc/detect_best.pth
+  path: ${PROJECT_ROOT}/weights/cavc/lpips_best.pth
   strict: false
-  rules:
-    - ["startswith", "dino.model", "useless"]
-    # - ["startswith", "dino.feature_model", "dino.model"]
-    # - ["startswith", "post_reg_tokens", "dino_codec.post_reg_tokens"]
-    # - ["startswith", "pre_vit_blocks.", "dino_codec.pre_vit_blocks."]
-    # - ["startswith", "post_vit_blocks.", "dino_codec.post_vit_blocks."]
-    # - ["startswith", "f_a.", "dino_codec.f_a."]
-    # - ["startswith", "f_s.", "dino_codec.f_s."]
-    # - ["startswith", "latent_codec.hyper.", "dino_codec.hyper_lc."]
-    # - ["startswith", "latent_codec.y.", "dino_codec.y_lc."]
+  rules: # type, pattern, replacement
+    # - ["startswith", "dino.model", "useless"]
 
 
 model: 
@@ -39,7 +33,7 @@ model:
     feature_extract_fn: feature_extract
     
   fixed_scale: 1.0
-  ffmpeg_path: /mnt/netdisk/车网_sandwich/traffic-network/Restormer/ffmpeg-7.0.2-amd64-static/ffmpeg
+  ffmpeg_path: ffmpeg
   ffmpeg_verbose: True
 
 codec_args:

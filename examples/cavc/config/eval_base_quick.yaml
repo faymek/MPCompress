@@ -38,66 +38,6 @@ datasets:
         src_width: 1920
         src_height: 1080
         frame_num: 120
-      Bosphorus.mp4:
-        src_width: 1920
-        src_height: 1080
-        frame_num: 120
-      CityAlley.mp4:
-        src_width: 1920
-        src_height: 1080
-        frame_num: 120
-      FlowerFocus.mp4:
-        src_width: 1920
-        src_height: 1080
-        frame_num: 120
-      FlowerKids.mp4:
-        src_width: 1920
-        src_height: 1080
-        frame_num: 120
-      FlowerPan.mp4:
-        src_width: 1920
-        src_height: 1080
-        frame_num: 120
-      HoneyBee.mp4:
-        src_width: 1920
-        src_height: 1080
-        frame_num: 120
-      Jockey.mp4:
-        src_width: 1920
-        src_height: 1080
-        frame_num: 120
-      Lips.mp4:
-        src_width: 1920
-        src_height: 1080
-        frame_num: 120
-      RaceNight.mp4:
-        src_width: 1920
-        src_height: 1080
-        frame_num: 120
-      ReadySteadyGo.mp4:
-        src_width: 1920
-        src_height: 1080
-        frame_num: 120
-      RiverBank.mp4:
-        src_width: 1920
-        src_height: 1080
-        frame_num: 120
-      ShakeNDry.mp4:
-        src_width: 1920
-        src_height: 1080
-        frame_num: 60
-      SunBath.mp4:
-        src_width: 1920
-        src_height: 1080
-        frame_num: 60
-      Twilight.mp4:
-        src_width: 1920
-        src_height: 1080
-        frame_num: 120
-      YachtRide.mp4:
-        src_width: 1920
-        src_height: 1080
-        frame_num: 120
 
 # 头部模型配置
 heads:
