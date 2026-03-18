@@ -173,7 +173,6 @@ def eval_model(cfg):
         model.update()
 
     dataset_meter = DictAverageMeter()
-    video_records = DataFrameRecords()
 
     # 构建数据集
     print("构建数据集...")
@@ -207,13 +206,17 @@ def eval_model(cfg):
         img_metrics_dict, dir_metrics_dict = split_img_metrics(img_metrics_dict)
 
     # 创建输出目录
+    recon_dir = os.path.join(cfg.args.output_dir, "recon_frames")
+    temp_input_dir = os.path.join(cfg.args.output_dir, "temp_input_dir")
     if cfg.args.output_dir:
         out_sub_dir = f"{cfg.args.output_dir}/{cfg.args.quality}"
         os.makedirs(out_sub_dir, exist_ok=True)
-        temp_input_dir = f"{cfg.args.output_dir}/temp_input_dir"
-        if os.path.exists(temp_input_dir):
-            shutil.rmtree(temp_input_dir)
-        os.makedirs(temp_input_dir, exist_ok=True)
+    if os.path.exists(temp_input_dir):
+        shutil.rmtree(temp_input_dir)
+    os.makedirs(temp_input_dir, exist_ok=True)
+    if os.path.exists(recon_dir):
+        shutil.rmtree(recon_dir)
+    os.makedirs(recon_dir, exist_ok=True)
 
     # 评估循环
     records = []
@@ -240,9 +243,12 @@ def eval_model(cfg):
             **bpp_items,
         }
 
+        video_iqa_result = {}
         if cfg.args.recon != 0:
+            video_records = DataFrameRecords()
             vid_reader = VideoReader(vid_meta["path"])
             vid_name = vid_meta["seq_name"].split(".")[0]
+            missing_external_gt = 0
         
             for i, frame_bgr in enumerate(vid_reader):
                 x_org = None
@@ -251,6 +257,8 @@ def eval_model(cfg):
                     gt_path = os.path.join(frame_gt_dir, gt_name)
                     if os.path.isfile(gt_path):
                         x_org = load_png_to_tensor(gt_path, model.device)
+                    else:
+                        missing_external_gt += 1
 
                 if x_org is None:
                     # Fallback to source video frame when external GT is not provided
@@ -268,8 +276,14 @@ def eval_model(cfg):
                 }
                 frame_iqa_result["_id"] = i
                 video_records.update(frame_iqa_result)
-                
-        video_iqa_result = video_records.average()
+
+            if use_external_frame_gt and missing_external_gt > 0:
+                print(
+                    f"[warn] {vid_name}: {missing_external_gt} frames missing in "
+                    "--frame_gt_dir, online frame metrics fell back to source video"
+                )
+
+            video_iqa_result = video_records.average()
 
         # 逐帧计算detection任务指标
         if head_config and "det" in task_name:
@@ -290,7 +304,7 @@ def eval_model(cfg):
 
         if True: # OFFLINE_COMPUTE
             vid_name = vid_meta['seq_name'].split('.')[0]
-            save_dir = os.path.join(cfg.args.output_dir, "recon_frames")
+            save_dir = recon_dir
             os.makedirs(save_dir, exist_ok=True)
             for i in tqdm(range(len(decoded_vid))):
                 save_path = os.path.join(save_dir, f"{vid_name}_{(i+1):08d}.png")
@@ -307,7 +321,6 @@ def eval_model(cfg):
     avg_metrics = dataset_meter.average()
 
     if cfg.args.recon != 0 and dir_metrics_dict:
-        recon_dir = os.path.join(cfg.args.output_dir, "recon_frames")
         dir_results = {}
         for name, func in dir_metrics_dict.items():
             if name.startswith("Det-"):
