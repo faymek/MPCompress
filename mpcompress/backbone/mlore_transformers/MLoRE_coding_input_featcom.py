@@ -749,11 +749,20 @@ class MLoRE(nn.Module):
                 break
         return features
     
-    def forward_withfeat(self, feat, episode_tasks=None, eval=True):
+    def forward_withfeat(self, feat, episode_tasks=None, eval=True,
+                         skip_compress: bool = False,
+                         real_compress: bool = False):
         '''
         e.g.,
           episode_tasks: [['segmentation', 'depth'], [the other tasks]]
           task_index: [[0,2], [1,3,4]]
+
+        skip_compress: True when `feat` has already been compressed+decompressed
+            externally (e.g. by MLoREFrameCodec.decompress). Skips the internal
+            compression block to avoid double compression.
+        real_compress: When True, the internal compression block uses real
+            entropy coding (rANS round-trip); when False, uses likelihood
+            simulation. Ignored when skip_compress=True.
         '''
 
         # multi-scale backbone feature
@@ -766,32 +775,45 @@ class MLoRE(nn.Module):
         out_mask = {tasks: 0 for tasks in all_tasks}
         info = {} # pass information through the pipeline
 
-        
+
         #### obtain the feat at the front-end
         info['bpp_loss'] = 0.0
         info['mse_loss'] = 0.0
         info['detailed_bpp'] = {tasks: 0.0 for tasks in all_tasks}
         info['detailed_mse'] = {tasks: 0.0 for tasks in all_tasks}
-        
+
         ####decoder side
-        
+
         for idx, blk in enumerate(self.blocks):
             if idx + 1 < self.return_feature_idx + 1:
                 continue
             elif idx + 1 == self.return_feature_idx + 1:
-                xx = rearrange(x, 'b (h w) c -> b c h w', h=self.resolution[0], w=self.resolution[1])
-                bpp_loss, mse_loss, x = self.compress(xx)#(lora_feat[tasks], target=inter_feat)            
+                if skip_compress:
+                    # feat already decompressed externally; skip internal codec
+                    bpp_loss = 0.0
+                    mse_loss = 0.0
+                else:
+                    xx = rearrange(x, 'b (h w) c -> b c h w', h=self.resolution[0], w=self.resolution[1])
+                    if not real_compress:
+                        bpp_loss, mse_loss, x = self.compress(xx)
+                    else:
+                        out_enc = self.compress.compress(xx)
+                        out_dec = self.compress.decompress(out_enc["strings"], out_enc["shape"])
+                        bpp_loss = (sum(len(s[0]) for s in out_enc["strings"]) * 8.0 / (xx.shape[0]*xx.shape[2]*xx.shape[3]*256))
+                        mse_loss = 0.0
+                        x = out_dec['x_hat']
+                    x = rearrange(x, 'b c h w -> b (h w) c', h=self.resolution[0], w=self.resolution[1])
+
                 info['bpp_loss'] += bpp_loss
                 info['mse_loss'] += mse_loss
-                x = rearrange(x, 'b c h w -> b (h w) c', h=self.resolution[0], w=self.resolution[1])
-                if idx in self.select_list: 
+                if idx in self.select_list:
                     # extract task-specific feature at this layer
                     il = np.sum(idx >= (np.array(self.select_list) - 1)) - 1 # [0,1,2]
                     xx = rearrange(x, 'b (h w) c -> b c h w', h=self.resolution[0], w=self.resolution[1])
                     for task_list in episode_tasks:
                         tasks = ''.join(task_list)
-                        last_feat[tasks] += self.fea_fuse[il](xx) 
-                
+                        last_feat[tasks] += self.fea_fuse[il](xx)
+
             x, attn_weight = blk(x)
             
             if idx + 1 in self.select_list: 
@@ -817,14 +839,14 @@ class MLoRE(nn.Module):
 
         return final_feat, info
 
-    def forward(self, x, episode_tasks, eval=True):
+    def forward(self, x, episode_tasks, eval=True, real_compress: bool = False):
         '''
         e.g.,
           episode_tasks: [['segmentation', 'depth'], [the other tasks]]
           task_index: [[0,2], [1,3,4]]
         '''
         x = self.get_features(x)
-        return self.forward_withfeat(x, episode_tasks)
+        return self.forward_withfeat(x, episode_tasks, real_compress=real_compress)
 
 def _init_vit_weights(module: nn.Module, name: str = '', head_bias: float = 0., jax_impl: bool = False):
     """ ViT weight initialization

@@ -398,9 +398,19 @@ class MLoREFrameCodec(CompressionModel):
         feat_seq = feat_hat.permute(0, 2, 3, 1).reshape(B, H * W, C)
         
         # Decode through backbone backend
+        # skip_compress=True signals that feat_seq is already post-decompression,
+        # so forward_withfeat must not re-run its internal compression block
+        # (which would cause double compression — the bug fixed by this change).
         episode_tasks = [list(tasks)]
         if hasattr(self.backbone, 'forward_withfeat'):
-            task_features, info = self.backbone.forward_withfeat(feat_seq, episode_tasks)
+            import inspect
+            sig = inspect.signature(self.backbone.forward_withfeat)
+            kwargs = {}
+            if 'skip_compress' in sig.parameters:
+                kwargs['skip_compress'] = True
+            task_features, info = self.backbone.forward_withfeat(
+                feat_seq, episode_tasks, **kwargs
+            )
         else:
             raise RuntimeError("Backbone does not support forward_withfeat method")
         
